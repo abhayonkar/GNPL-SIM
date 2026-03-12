@@ -1,0 +1,170 @@
+function cfg = simConfig()
+% simConfig  Single source of truth for all simulation parameters.
+%
+%  Sections:  1.Time  2.Topology  3.Pipes  4.InitState  5.Compressor
+%             6.Valve  7.EKF  8.PLC  9.PID  10.Noise  11.Alarms
+%             12.SourceProfile  13.PhysicsNoise  14.AttackParams
+
+    %% 1. Time
+    cfg.dt = 0.1;           % time step (s)
+    cfg.T  = 120 * 60;      % 120 minutes total
+
+    %% 2. Network topology
+    cfg.nodeNames = ["S1","J1","J2","J3","J4","J5","D1","D2"];
+    cfg.edges     = [1 2; 2 3; 3 4; 3 5; 5 6; 4 7; 6 8];
+    cfg.edgeNames = ["E1","E2","E3","E4","ValveLine","E6","E7"];
+    cfg.valveEdge = 5;
+
+    %% 3. Pipe physical properties
+    cfg.pipe_D     = 0.8;
+    cfg.pipe_L     = 40e3;
+    cfg.pipe_rough = 20e-6;
+    cfg.node_V     = 6;
+    cfg.c          = 350;
+    cfg.gamma      = 1.3;
+
+    %% 4. Initial state
+    cfg.p0   = 4.5;
+    cfg.T0   = 288;
+    cfg.rho0 = 0.8;
+
+    %% 5. Compressor
+    cfg.comp_node  = 2;
+    cfg.comp_ratio = 1.25;
+    cfg.comp_a1 =  500;  cfg.comp_a2 = -0.5;   cfg.comp_a3 = -0.001;
+    cfg.comp_b1 =  0.80; cfg.comp_b2 = -0.002; cfg.comp_b3 = -0.0001;
+    cfg.comp_ratio_min = 1.10;
+    cfg.comp_ratio_max = 2.00;
+
+    %% 6. Valve
+    cfg.valve_open_default = 1;
+
+    %% 7. EKF
+    cfg.ekf_P0 = 0.01; cfg.ekf_Qn = 1e-5; cfg.ekf_Rk = 0.01;
+
+    %% 8. PLC / SCADA
+    cfg.plc_period  = 10;
+    cfg.plc_latency = 2;
+
+    %% 9. Control (PID)
+    cfg.pid_Kp = 0.5; cfg.pid_Ki = 0.01; cfg.pid_Kd = 0.1;
+    cfg.pid_setpoint    = 5.0;
+    cfg.pid_D1_node     = 7;
+    cfg.pid_J3_node     = 5;
+    cfg.valve_close_hi  = 5.1;
+    cfg.valve_open_lo   = 4.1;
+    cfg.emer_shutdown_p = 9.0;
+
+    %% 10. Sensor noise
+    % Multiplicative fractional noise: std = sensor_noise * |measured_value|
+    % Valid range: 0.0005 to 0.002 (0.05% to 0.2%) per Req 9
+    % Absolute noise floor applied when signal near zero: 0.0001 units
+    cfg.sensor_noise       = 0.001;    % fractional std (0.1%)
+    cfg.sensor_noise_floor = 0.0001;   % absolute minimum noise (Req 9)
+
+    %% 11. Alarm thresholds
+    cfg.alarm_P_high    = 8.5;
+    cfg.alarm_P_low     = 1.0;
+    cfg.alarm_ekf_resid = 0.5;
+    cfg.alarm_comp_hi   = 1.95;
+
+    %% 12. Source profile oscillation
+    cfg.src_slow_amp  = 0.20; cfg.src_med_amp  = 0.10;
+    cfg.src_fast_amp  = 0.04; cfg.src_trend    = 0.08;
+    cfg.src_rw_amp    = 0.10; cfg.src_ar1_alpha = 0.997;
+    cfg.src_p_min     = 3.8;  cfg.src_p_max    = 6.2;
+    cfg.dem_base      = 0.060; cfg.dem_slow_amp = 0.030;
+    cfg.dem_fast_amp  = 0.015; cfg.dem_noise_std = 0.004;
+    cfg.dem_min = 0.01; cfg.dem_max = 0.18;
+
+    %% 13. Continuous physics noise (prevents flat steady-state)
+    % --- Compressor shaft pulsation (Req 5) ---
+    % Blade-pass frequency oscillation + stochastic surge margin jitter.
+    % pulsation_amp: fraction of ratio; valid 0.005-0.015 (0.5%-1.5%)
+    % pulsation_freq: Hz; valid 1.5-3.0 Hz (blade-pass band)
+    % surge_noise: surge margin std; valid 0.003-0.010
+    % surge_corr: AR(1) autocorrelation for surge jitter; must be in (0,1)
+    cfg.comp_pulsation_amp  = 0.008;   % 0.8% ratio jitter amplitude
+    cfg.comp_pulsation_freq = 2.0;     % Hz shaft frequency
+    cfg.comp_surge_noise    = 0.005;   % stochastic surge margin std
+    cfg.comp_surge_corr     = 0.92;    % AR(1) correlation for surge state
+
+    % --- Pipe flow turbulence (Req 2) ---
+    % AR(1) turbulence noise per edge, proportional to flow magnitude.
+    % flow_turb_std: fractional std; valid 0.005-0.015 (0.5%-1.5%)
+    % flow_turb_corr: AR(1) autocorrelation; valid 0.85-0.95
+    cfg.flow_turb_std  = 0.008;   % 0.8% fractional noise on flow
+    cfg.flow_turb_corr = 0.90;    % temporal autocorrelation
+
+    % --- Roughness drift (Req 6) ---
+    % Slow AR(1) wall fouling/erosion drift per edge.
+    % rough_var_std: fractional std; valid 0.05-0.15 (5%-15%)
+    % rough_corr: AR(1) autocorrelation; must be > 0.999 (very slow)
+    cfg.rough_var_std  = 0.10;    % fractional std
+    cfg.rough_corr     = 0.9995;  % very slow per-step drift
+
+    % --- Acoustic pressure micro-oscillations (Req 1) ---
+    % AR(1) standing-wave reflections at each node.
+    % p_acoustic_std: bar; valid 0.001-0.005 bar
+    % p_acoustic_corr: AR(1) autocorrelation; valid 0.80-0.95
+    cfg.p_acoustic_std  = 0.0015; % bar
+    cfg.p_acoustic_corr = 0.85;
+
+    % --- Joule-Thomson cooling + thermal mixing (Req 3) ---
+    % T_jt_coeff: K/bar; negative (cooling on pressure drop)
+    % T_turb_std: K per step; valid 0.03-0.10 K
+    % T_turb_corr: AR(1) autocorrelation; valid 0.80-0.90
+    cfg.T_jt_coeff  = -0.45;  % K/bar Joule-Thomson coefficient
+    cfg.T_turb_std  = 0.05;   % K stochastic thermal noise per step
+    cfg.T_turb_corr = 0.88;   % AR(1) autocorrelation for thermal noise
+
+    % --- Gas composition / density drift (Req 4) ---
+    % AR(1) multiplicative drift on rho0 representing CH4/C2H6 blend shift.
+    % rho_comp_std: fractional std; valid 0.002-0.006 (0.2%-0.6%)
+    % rho_comp_corr: AR(1) autocorrelation; must be > 0.995 (very slow drift)
+    cfg.rho_comp_std  = 0.004;   % fractional std on density
+    cfg.rho_comp_corr = 0.9998;  % AR(1) autocorrelation (daily-scale drift)
+
+    %% 14. Attack scheduling (randomised placement)
+    % atk_warmup_s:    earliest a first attack can start (let physics settle)
+    % atk_recovery_s:  seconds kept clear at end of simulation
+    % atk_min_gap_s:   minimum quiet time between consecutive attacks
+    % atk_dur_min/max: random duration range per attack (seconds)
+    cfg.atk_warmup_s   = 5 * 60;    % 5 min warmup before first attack
+    cfg.atk_recovery_s = 5 * 60;    % 5 min clean tail after last attack
+    cfg.atk_min_gap_s  = 15 * 60;    % minimum 15 min gap between attacks
+    cfg.atk_dur_min_s  = 90;        % shortest attack: 90 s
+    cfg.atk_dur_max_s  = 180;       % longest attack: 180 s
+
+    %% 15. Attack effect parameters
+    % A1 Source Pressure Manipulation  (T0831)
+    cfg.atk1_spike_amp = 1.30;     % 30% over-pressure spike factor
+    cfg.atk1_osc_freq  = 1/120;    % Hz oscillation frequency
+
+    % A2 Compressor Ratio Spoofing  (T0838)
+    cfg.atk2_target_ratio = 1.85;
+    cfg.atk2_ramp_time    = 120;   % s ramp to target
+
+    % A3 Valve Command Tampering  (T0855)
+    cfg.atk3_cmd = 0;              % forced valve state
+
+    % A4 Demand Node Manipulation  (T0829)
+    cfg.atk4_demand_scale = 2.5;
+    cfg.atk4_ramp_time    = 90;    % s
+
+    % A5 Pressure Sensor Spoofing  (T0831)
+    cfg.atk5_target_node = 3;      % J2 node index
+    cfg.atk5_bias_bar    = -1.2;   % bar bias injected into PLC
+
+    % A6 Flow Meter Spoofing  (T0827)
+    cfg.atk6_edges = [2, 3];       % E2, E3 edge indices
+    cfg.atk6_scale = 0.40;         % reported = real * scale
+
+    % A7 PLC Latency / DoS  (T0814)
+    cfg.atk7_extra_latency = 50;   % extra buffering steps
+
+    % A8 Pipeline Leak  (T0829)
+    cfg.atk8_edge      = 3;        % E3 upper branch
+    cfg.atk8_leak_frac = 0.45;     % fraction of flow lost at peak
+    cfg.atk8_ramp_time = 60;       % s to reach full leak magnitude
+end
