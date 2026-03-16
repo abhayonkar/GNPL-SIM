@@ -1,3 +1,84 @@
-Sim/automated_dataset/
-Sim/logs/
-Sim/middleware/logs
+# Large data files and logs
+automated_dataset/
+logs/
+middleware/logs/
+
+# MATLAB files
+*.asv
+*.m~
+*.mat
+*.fig
+*.slx
+*.mdl
+*.slxc
+*.sldd
+
+# Data files
+*.csv
+*.log
+*.json
+*.yaml
+*.yml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-*
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Project specific
+data/
+*.csv
+*.log
+*.mat
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+
+# Documentation
+*.docx
+*.pdf
+*.pptx
+*.xlsx
+# Specific large data files to ignore
+data/*.csv
+automated_dataset/*.csv
+automated_dataset/*.log
+automated_dataset/*.json
+
+# Keep only code and configuration files
+!data/README.md
+!automated_dataset/README.md
