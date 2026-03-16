@@ -1,28 +1,29 @@
-function detectIncidents(cfg, params, state, ekf, comp, plc, k, dt)
+function detectIncidents(cfg, params, state, ekf, comp1, comp2, plc, k, dt)
 % detectIncidents  Evaluate all alarm conditions and emit logEvent entries.
 %
-%   detectIncidents(cfg, params, state, ekf, comp, plc, k, dt)
+%   detectIncidents(cfg, params, state, ekf, comp1, comp2, plc, k, dt)
 %
 %   This function is stateless: alarm de-bounce / edge-detection is handled
-%   via persistent variables that are keyed by the calling simulation
-%   (they reset when MATLAB is restarted or the persistent is cleared).
+%   via persistent variables that reset on MATLAB restart or 'clear all'.
 %
 %   Alarms
 %   ------
-%   1. High nodal pressure  (> cfg.alarm_P_high)
-%   2. Low nodal pressure   (< cfg.alarm_P_low)
+%   1. High nodal pressure      (> cfg.alarm_P_high)
+%   2. Low nodal pressure       (< cfg.alarm_P_low)
 %   3. EKF residual divergence  (|residP| > cfg.alarm_ekf_resid)
-%   4. Compressor ratio near ceiling  (>= cfg.alarm_comp_hi)
-%   5. Valve state transition  (act_valve_cmd changed vs previous step)
+%   4. CS1 ratio near ceiling   (>= cfg.alarm_comp_hi)
+%   5. CS2 ratio near ceiling   (>= cfg.alarm_comp_hi)
+%   6. Valve state transition   (any element of act_valve_cmds changed)
 
-    persistent highPressureActive ekfDivActive compHiActive prevValveCmd;
+    persistent highPressureActive ekfDivActive comp1HiActive comp2HiActive prevValveCmds
 
-    if isempty(highPressureActive), highPressureActive = false; end
-    if isempty(ekfDivActive),       ekfDivActive       = false; end
-    if isempty(compHiActive),       compHiActive       = false; end
-    if isempty(prevValveCmd),       prevValveCmd       = plc.act_valve_cmd; end
+    if isempty(highPressureActive),  highPressureActive  = false; end
+    if isempty(ekfDivActive),        ekfDivActive        = false; end
+    if isempty(comp1HiActive),       comp1HiActive       = false; end
+    if isempty(comp2HiActive),       comp2HiActive       = false; end
+    if isempty(prevValveCmds),       prevValveCmds       = plc.act_valve_cmds; end
 
-    %% 1 & 2. Pressure limits -------------------------------------------------
+    %% 1 & 2. Pressure limits ─────────────────────────────────────────────
     for n = 1:params.nNodes
         if state.p(n) > cfg.alarm_P_high
             if ~highPressureActive
@@ -42,7 +43,7 @@ function detectIncidents(cfg, params, state, ekf, comp, plc, k, dt)
         end
     end
 
-    %% 3. EKF residual divergence ---------------------------------------------
+    %% 3. EKF residual divergence ──────────────────────────────────────────
     if any(abs(ekf.residP) > cfg.alarm_ekf_resid)
         if ~ekfDivActive
             ekfDivActive = true;
@@ -55,27 +56,43 @@ function detectIncidents(cfg, params, state, ekf, comp, plc, k, dt)
         ekfDivActive = false;
     end
 
-    %% 4. Compressor near ceiling ---------------------------------------------
-    if comp.ratio >= cfg.alarm_comp_hi
-        if ~compHiActive
-            compHiActive = true;
+    %% 4. CS1 ratio near ceiling ───────────────────────────────────────────
+    if comp1.ratio >= cfg.alarm_comp_hi
+        if ~comp1HiActive
+            comp1HiActive = true;
             logEvent('WARNING', 'detectIncidents', ...
-                     sprintf('Compressor ratio near ceiling: %.4f (limit %.2f)', ...
-                             comp.ratio, comp.ratio_max), k, dt);
+                     sprintf('CS1 ratio near ceiling: %.4f (max %.2f)', ...
+                             comp1.ratio, comp1.ratio_max), k, dt);
         end
     else
-        compHiActive = false;
+        comp1HiActive = false;
     end
 
-    %% 5. Valve state transition -----------------------------------------------
-    if plc.act_valve_cmd ~= prevValveCmd
-        if plc.act_valve_cmd == 0
+    %% 5. CS2 ratio near ceiling ───────────────────────────────────────────
+    if comp2.ratio >= cfg.alarm_comp_hi
+        if ~comp2HiActive
+            comp2HiActive = true;
             logEvent('WARNING', 'detectIncidents', ...
-                     'Valve CLOSED (act_valve_cmd = 0)', k, dt);
-        else
-            logEvent('INFO', 'detectIncidents', ...
-                     'Valve OPENED (act_valve_cmd = 1)', k, dt);
+                     sprintf('CS2 ratio near ceiling: %.4f (max %.2f)', ...
+                             comp2.ratio, comp2.ratio_max), k, dt);
         end
-        prevValveCmd = plc.act_valve_cmd;
+    else
+        comp2HiActive = false;
     end
+
+    %% 6. Valve state transitions ──────────────────────────────────────────
+    valveNames = ["E8", "E14", "E15"];
+    for v = 1:numel(plc.act_valve_cmds)
+        if plc.act_valve_cmds(v) ~= prevValveCmds(v)
+            if plc.act_valve_cmds(v) == 0
+                logEvent('WARNING', 'detectIncidents', ...
+                         sprintf('Valve %s CLOSED (cmd=0)', valveNames(v)), k, dt);
+            else
+                logEvent('INFO', 'detectIncidents', ...
+                         sprintf('Valve %s OPENED (cmd=%.2f)', valveNames(v), ...
+                                 plc.act_valve_cmds(v)), k, dt);
+            end
+        end
+    end
+    prevValveCmds = plc.act_valve_cmds;
 end

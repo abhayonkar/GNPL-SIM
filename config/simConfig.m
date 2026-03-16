@@ -146,6 +146,7 @@ function cfg = simConfig()
     cfg.plc_period_z2  = 15;   % distribution zone (slightly slower)
     cfg.plc_period_z3  = 20;   % storage zone (slowest)
     cfg.plc_latency    = 3;    % actuator command delay steps
+    cfg.valve_open_default = 1;   % initial valve state (1=open, 0=closed)
 
     % Legacy single-plc compatibility
     cfg.plc_period = cfg.plc_period_z1;

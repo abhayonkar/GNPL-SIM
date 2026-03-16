@@ -1,0 +1,33 @@
+# config.yaml
+# Change plc.type to swap hardware — nothing else changes:
+#   "modbus"  = CODESYS ModbusTCP_Server_Device (current setup)
+#   "s7"      = Siemens S7-1200
+
+plc:
+  type: "modbus"
+  host: "127.0.0.1"    # CODESYS on same PC
+  port: 1502
+  unit_id: 1
+
+  # S7 settings (only used when type = "s7")
+  rack: 0
+  slot: 1
+  db_sensors: 1
+  db_actuators: 2
+
+matlab:
+  recv_ip:   "0.0.0.0"
+  recv_port: 5005
+  send_ip:   "127.0.0.1"
+  send_port: 6006
+  timeout_s: 0.5
+
+network:
+  n_nodes: 20
+  n_edges: 20
+  node_names: [S1,J1,CS1,J2,J3,J4,CS2,J5,J6,PRS1,J7,STO,PRS2,S2,D1,D2,D3,D4,D5,D6]
+  edge_names: [E1,E2,E3,E4,E5,E6,E7,E8,E9,E10,E11,E12,E13,E14,E15,E16,E17,E18,E19,E20]
+
+cycle_time_s: 0.1
+log_every_n_cycles: 10     # log 1 in every 10 cycles (~10Hz logging vs 100Hz sim)
+log_dir: "logs"

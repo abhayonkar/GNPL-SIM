@@ -1,0 +1,14 @@
+Gas Pipeline CPS Simulator - Attack Timeline Report
+Simulation: 300 min  dt=0.10s  N=180000
+
+AID   Name                                       Start    End      Dur(s)   Rows     Pct(%)    
+------------------------------------------------------------------------------------------
+A7    PLCLatencyAttack                            1833.6s  2127.4s     294s    2939      1.6%
+A3    ValveCommandTampering                       8965.4s  9290.2s     325s    3249      1.8%
+A4    DemandNodeManipulation                      9659.4s 10037.8s     378s    3785      2.1%
+A5    PressureSensorSpoofing                     10642.7s 11033.7s     391s    3911      2.2%
+A8    PipelineLeak                               12545.9s 12880.8s     335s    3350      1.9%
+A1    SrcPressureManipulation                    15610.4s 15957.0s     347s    3467      1.9%
+A6    FlowMeterSpoofing                          16643.5s 17010.6s     367s    3672      2.0%
+A2    CompressorRatioSpoofing                    17360.5s 17675.7s     315s    3153      1.8%
+0     Normal                                          --      --      --  152474     84.7%
