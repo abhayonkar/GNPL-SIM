@@ -7,7 +7,7 @@ const MODULES = {
     bg: "rgba(245,158,11,0.08)",
     border: "#f59e0b",
     files: ["simConfig.m"],
-    desc: "Single source of truth — all magic numbers",
+    desc: "Single source of truth — all parameters for 20-node network",
     icon: "⚙",
   },
   network: {
@@ -16,7 +16,7 @@ const MODULES = {
     bg: "rgba(56,189,248,0.08)",
     border: "#38bdf8",
     files: ["initNetwork.m", "updateFlow.m", "updatePressure.m", "updateTemperature.m"],
-    desc: "Topology, incidence matrix, Darcy-Weisbach physics",
+    desc: "20-node topology, incidence matrix B(20×20), Darcy-Weisbach + hydrostatic",
     icon: "🔗",
   },
   equipment: {
@@ -24,8 +24,9 @@ const MODULES = {
     color: "#fb923c",
     bg: "rgba(251,146,60,0.08)",
     border: "#fb923c",
-    files: ["initCompressor.m", "updateCompressor.m", "initValve.m", "updateDensity.m"],
-    desc: "Compressor curves, valve state, gas density",
+    files: ["initCompressor.m", "updateCompressor.m", "initPRS.m", "updatePRS.m",
+            "updateStorage.m", "initValve.m", "updateDensity.m"],
+    desc: "Dual CS1/CS2 compressors, PRS1/PRS2 stations, storage cavern, Peng-Robinson EOS",
     icon: "🔧",
   },
   scada: {
@@ -34,7 +35,7 @@ const MODULES = {
     bg: "rgba(167,139,250,0.08)",
     border: "#a78bfa",
     files: ["initEKF.m", "updateEKF.m", "initPLC.m", "updatePLC.m"],
-    desc: "Extended Kalman Filter, PLC polling & latency",
+    desc: "Extended Kalman Filter (40-state), PLC polling & latency buffer",
     icon: "📡",
   },
   control: {
@@ -43,7 +44,7 @@ const MODULES = {
     bg: "rgba(52,211,153,0.08)",
     border: "#34d399",
     files: ["updateControlLogic.m"],
-    desc: "PID compressor control, valve interlocks, emergency shutdown",
+    desc: "PID for CS1/CS2, valve interlocks, PRS setpoints, emergency shutdown",
     icon: "🎛",
   },
   attacks: {
@@ -51,8 +52,9 @@ const MODULES = {
     color: "#f87171",
     bg: "rgba(248,113,113,0.08)",
     border: "#f87171",
-    files: ["initAttackSchedule.m", "applyAttackEffects.m", "detectIncidents.m"],
-    desc: "MITRE ATT&CK schedule, injection logic, alarm detection",
+    files: ["initAttackSchedule.m", "applyAttackEffects.m",
+            "applySensorSpoof.m", "detectIncidents.m"],
+    desc: "A1–A10 MITRE ATT&CK schedule, injection logic, sensor spoof, alarm detection",
     icon: "⚠",
   },
   profiling: {
@@ -61,7 +63,7 @@ const MODULES = {
     bg: "rgba(232,121,249,0.08)",
     border: "#e879f9",
     files: ["generateSourceProfile.m"],
-    desc: "Realistic AR(1) source pressure & demand profiles",
+    desc: "Diurnal AR(1) source pressure & demand profiles (dual-source S1/S2)",
     icon: "📈",
   },
   logging: {
@@ -70,7 +72,7 @@ const MODULES = {
     bg: "rgba(148,163,184,0.08)",
     border: "#94a3b8",
     files: ["initLogs.m", "updateLogs.m", "logEvent.m", "initLogger.m", "closeLogger.m"],
-    desc: "Log pre-allocation, event logger, session management",
+    desc: "Log pre-allocation for 20-node arrays, event logger, session management",
     icon: "📋",
   },
   export: {
@@ -79,34 +81,51 @@ const MODULES = {
     bg: "rgba(74,222,128,0.08)",
     border: "#4ade80",
     files: ["exportDataset.m", "exportResults.m"],
-    desc: "Structured dataset & legacy CSV export",
+    desc: "Dual-stream dataset export — physics CSV + protocol CSV",
     icon: "💾",
+  },
+  middleware: {
+    label: "middleware/",
+    color: "#22d3ee",
+    bg: "rgba(34,211,238,0.08)",
+    border: "#22d3ee",
+    files: ["gateway.py", "data_logger.py", "diagnostic.py",
+            "sendToGateway.m", "receiveFromGateway.m",
+            "initGatewayState.m", "config.yaml"],
+    desc: "Python Modbus TCP bridge ↔ CODESYS SoftPLC + MATLAB UDP link + transaction logger",
+    icon: "🔌",
   },
 };
 
 const CALL_SEQUENCE = [
-  { step: 1, mod: "attacks",   fn: "applyAttackEffects",   note: "Modify src_p / actuators per active attack ID" },
-  { step: 2, mod: "network",   fn: "updateFlow",           note: "Darcy-Weisbach edge flows" },
-  { step: 3, mod: "network",   fn: "updatePressure",       note: "Nodal mass-balance pressure update" },
-  { step: 4, mod: "equipment", fn: "updateCompressor",     note: "Head / power / pressure boost" },
-  { step: 5, mod: "network",   fn: "updateTemperature",    note: "Lumped thermal model" },
-  { step: 6, mod: "equipment", fn: "updateDensity",        note: "Real-gas density" },
-  { step: 7, mod: "scada",     fn: "updatePLC",            note: "Discrete sensor polling + latency buffer" },
-  { step: 8, mod: "scada",     fn: "updateEKF",            note: "Kalman correction step" },
-  { step: 9, mod: "control",   fn: "updateControlLogic",   note: "PID + safety interlocks" },
-  { step: 10, mod: "logging",  fn: "updateLogs",           note: "Append full state to log arrays" },
-  { step: 11, mod: "attacks",  fn: "detectIncidents",      note: "Threshold alarms → logEvent" },
+  { step: 1,  mod: "attacks",    fn: "applyAttackEffects",   note: "A1–A4: modify src_p / actuators per active attack ID" },
+  { step: 2,  mod: "network",    fn: "updateFlow",           note: "Darcy-Weisbach + elevation hydrostatic + AR(1) turbulence" },
+  { step: 3,  mod: "equipment",  fn: "updateStorage",        note: "Bidirectional inject/withdraw, inventory tracking" },
+  { step: 4,  mod: "network",    fn: "updatePressure",       note: "Nodal mass-balance dp/dt = (c²/V)·B·q + acoustic AR(1)" },
+  { step: 5,  mod: "equipment",  fn: "updateCompressor ×2",  note: "CS1 then CS2 — head curve, efficiency, blade-pass pulsation" },
+  { step: 6,  mod: "equipment",  fn: "updatePRS ×2",         note: "PRS1 (30 bar) + PRS2 (25 bar) — first-order throttle response" },
+  { step: 7,  mod: "network",    fn: "updateTemperature",    note: "Joule-Thomson cooling + thermal AR(1) per node" },
+  { step: 8,  mod: "equipment",  fn: "updateDensity",        note: "Peng-Robinson EOS cubic Z solver, composition drift" },
+  { step: 9,  mod: "attacks",    fn: "applySensorSpoof",     note: "A5/A6: corrupt sensor_p / sensor_q before PLC sees them" },
+  { step: 10, mod: "middleware", fn: "sendToGateway",        note: "UDP → Python → Modbus FC16 → CODESYS (61 registers)" },
+  { step: 11, mod: "middleware", fn: "receiveFromGateway",   note: "CODESYS → Modbus FC3/FC1 → Python → UDP (9 regs + 7 coils)" },
+  { step: 12, mod: "scada",      fn: "updatePLC",            note: "Discrete sensor polling + A7 latency buffer inflation" },
+  { step: 13, mod: "scada",      fn: "updateEKF",            note: "40-state Kalman correction [20p + 20q]" },
+  { step: 14, mod: "control",    fn: "updateControlLogic",   note: "PID CS1/CS2 + valve interlocks + emergency shutdown" },
+  { step: 15, mod: "logging",    fn: "updateLogs",           note: "Append full state: pressure, flow, temp, comp, PRS, storage" },
+  { step: 16, mod: "attacks",    fn: "detectIncidents",      note: "Threshold alarms → logEvent" },
 ];
 
 const OUTPUTS = [
-  { file: "master_dataset.csv",      dir: "automated_dataset/", color: "#4ade80" },
-  { file: "normal_only.csv",         dir: "automated_dataset/", color: "#4ade80" },
-  { file: "attacks_only.csv",        dir: "automated_dataset/", color: "#f87171" },
-  { file: "attack_metadata.json",    dir: "automated_dataset/", color: "#fb923c" },
-  { file: "attack_timeline.log",     dir: "automated_dataset/", color: "#fb923c" },
-  { file: "execution_details.log",   dir: "automated_dataset/", color: "#94a3b8" },
-  { file: "sim_events.log",          dir: "logs/",              color: "#94a3b8" },
-  { file: "pressure.csv + others",   dir: "data/",              color: "#38bdf8" },
+  { file: "master_dataset.csv",       dir: "automated_dataset/", color: "#4ade80",  note: "Physics + attack labels, 20-node columns" },
+  { file: "normal_only.csv",          dir: "automated_dataset/", color: "#4ade80",  note: "Subset: attack_id = 0" },
+  { file: "attacks_only.csv",         dir: "automated_dataset/", color: "#f87171",  note: "Subset: attack_id > 0" },
+  { file: "attack_metadata.json",     dir: "automated_dataset/", color: "#fb923c",  note: "Per-attack timing & parameters" },
+  { file: "attack_timeline.log",      dir: "automated_dataset/", color: "#fb923c",  note: "Human-readable attack schedule" },
+  { file: "execution_details.log",    dir: "automated_dataset/", color: "#94a3b8",  note: "Per-step execution log" },
+  { file: "sim_events.log",           dir: "logs/",              color: "#94a3b8",  note: "Alarm + incident events" },
+  { file: "modbus_transactions_*.csv",dir: "middleware/logs/",   color: "#22d3ee",  note: "Protocol layer — FC codes, raw INT registers, timestamps" },
+  { file: "pipeline_data_*.csv",      dir: "middleware/logs/",   color: "#22d3ee",  note: "150-col snapshot: eng values + raw INTs + coils" },
 ];
 
 function ModuleCard({ id, data, selected, onClick }) {
@@ -180,17 +199,17 @@ export default function App() {
       color: "#e2e8f0",
       padding: "32px 24px",
       backgroundImage: `radial-gradient(ellipse at 20% 20%, rgba(245,158,11,0.04) 0%, transparent 60%),
-                        radial-gradient(ellipse at 80% 80%, rgba(56,189,248,0.04) 0%, transparent 60%)`,
+                        radial-gradient(ellipse at 80% 80%, rgba(34,211,238,0.04) 0%, transparent 60%)`,
     }}>
-      {/* Header */}
       <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+        {/* Header */}
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 32 }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
               <div style={{ width: 3, height: 36, background: "#f59e0b", borderRadius: 2 }} />
               <div>
                 <div style={{ fontSize: 11, color: "#f59e0b", fontFamily: "'Fira Code', monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 2 }}>
-                  Gas Pipeline CPS Simulator v5
+                  Gas Pipeline CPS Simulator v6
                 </div>
                 <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800, letterSpacing: -0.5, color: "#f1f5f9" }}>
                   System Architecture
@@ -198,11 +217,11 @@ export default function App() {
               </div>
             </div>
             <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 12, paddingLeft: 15 }}>
-              27 files · 9 modules · MITRE ATT&CK ICS · EKF · PID
+              38 files · 10 modules · 20 nodes · 20 edges · CODESYS Modbus TCP · MITRE ATT&CK ICS · EKF-40
             </div>
           </div>
           <div style={{ display: "flex", gap: 6, background: "rgba(255,255,255,0.04)", padding: 4, borderRadius: 8, border: "1px solid rgba(255,255,255,0.07)" }}>
-            {[["arch","Modules"],["flow","Call Sequence"],["outputs","Outputs"]].map(([key, label]) => (
+            {[["arch","Modules"],["flow","Call Sequence"],["outputs","Outputs"],["stack","CPS Stack"]].map(([key, label]) => (
               <button key={key} style={TAB_STYLE(tab === key)} onClick={() => setTab(key)}>{label}</button>
             ))}
           </div>
@@ -220,16 +239,15 @@ export default function App() {
                 padding: "14px 32px",
                 textAlign: "center",
                 boxShadow: "0 0 32px rgba(245,158,11,0.15)",
-                minWidth: 260,
+                minWidth: 280,
               }}>
                 <div style={{ color: "#f59e0b", fontFamily: "'Fira Code', monospace", fontSize: 13, fontWeight: 800, letterSpacing: 1 }}>
                   main_simulation.m
                 </div>
                 <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 10, marginTop: 3 }}>
-                  Entry point · addpath() · calls all inits + runSimulation
+                  Entry point · addpath() · inits all subsystems · delegates to runSimulation.m
                 </div>
               </div>
-              {/* Arrow down */}
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
                 <div style={{ width: 2, height: 14, background: "rgba(255,255,255,0.15)" }} />
                 <div style={{ width: 0, height: 0, borderLeft: "6px solid transparent", borderRight: "6px solid transparent", borderTop: "8px solid rgba(255,255,255,0.2)" }} />
@@ -249,10 +267,9 @@ export default function App() {
             }}>
               <span style={{ fontSize: 14 }}>⚙</span>
               <span style={{ color: "#f59e0b", fontFamily: "'Fira Code', monospace", fontSize: 11, fontWeight: 700 }}>config/simConfig.m</span>
-              <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 10 }}>——  cfg struct injected into every module · no magic numbers elsewhere</span>
+              <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 10 }}>——  cfg struct injected into every module · 20-node topology · dual compressor · PR EOS params</span>
             </div>
 
-            {/* Arrow */}
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 4 }}>
               <div style={{ width: 2, height: 14, background: "rgba(255,255,255,0.15)" }} />
               <div style={{ width: 0, height: 0, borderLeft: "6px solid transparent", borderRight: "6px solid transparent", borderTop: "8px solid rgba(255,255,255,0.2)" }} />
@@ -263,20 +280,19 @@ export default function App() {
               <div style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: 2, marginBottom: 8, fontFamily: "'Fira Code', monospace" }}>
                 ── INIT PHASE ──────────────────────────────────────────────────────
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
-                {["network","equipment","scada","logging"].map(id => (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr", gap: 10 }}>
+                {["network","equipment","scada","logging","middleware"].map(id => (
                   <ModuleCard key={id} id={id} data={MODULES[id]} selected={selected} onClick={handleClick} />
                 ))}
               </div>
             </div>
 
-            {/* Arrow */}
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 4 }}>
               <div style={{ width: 2, height: 14, background: "rgba(255,255,255,0.15)" }} />
               <div style={{ width: 0, height: 0, borderLeft: "6px solid transparent", borderRight: "6px solid transparent", borderTop: "8px solid rgba(255,255,255,0.2)" }} />
             </div>
 
-            {/* Profiling + attacks init */}
+            {/* Profiling + attacks */}
             <div style={{ marginBottom: 4 }}>
               <div style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: 2, marginBottom: 8, fontFamily: "'Fira Code', monospace" }}>
                 ── PROFILE & SCHEDULE PHASE ─────────────────────────────────────────
@@ -288,13 +304,12 @@ export default function App() {
               </div>
             </div>
 
-            {/* Arrow */}
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 4 }}>
               <div style={{ width: 2, height: 14, background: "rgba(255,255,255,0.15)" }} />
               <div style={{ width: 0, height: 0, borderLeft: "6px solid transparent", borderRight: "6px solid transparent", borderTop: "8px solid rgba(255,255,255,0.2)" }} />
             </div>
 
-            {/* RunSimulation orchestrator */}
+            {/* RunSimulation */}
             <div style={{ marginBottom: 4 }}>
               <div style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: 2, marginBottom: 8, fontFamily: "'Fira Code', monospace" }}>
                 ── SIMULATION LOOP ──────────────────────────────────────────────────
@@ -307,17 +322,16 @@ export default function App() {
                 marginBottom: 10,
               }}>
                 <div style={{ color: "#38bdf8", fontFamily: "'Fira Code', monospace", fontSize: 12, fontWeight: 700, marginBottom: 8 }}>
-                  runSimulation.m  <span style={{ color: "rgba(255,255,255,0.25)", fontWeight: 400 }}>— orchestrator loop (N steps)</span>
+                  runSimulation.m  <span style={{ color: "rgba(255,255,255,0.25)", fontWeight: 400 }}>— orchestrator loop (N steps @ 10 Hz)</span>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-                  {["attacks","network","equipment","scada","control","logging"].map(id => (
+                  {["attacks","network","equipment","middleware","scada","control","logging"].map(id => (
                     <ModuleCard key={id} id={id} data={MODULES[id]} selected={selected} onClick={handleClick} />
                   ))}
                 </div>
               </div>
             </div>
 
-            {/* Arrow */}
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 4 }}>
               <div style={{ width: 2, height: 14, background: "rgba(255,255,255,0.15)" }} />
               <div style={{ width: 0, height: 0, borderLeft: "6px solid transparent", borderRight: "6px solid transparent", borderTop: "8px solid rgba(255,255,255,0.2)" }} />
@@ -348,7 +362,6 @@ export default function App() {
                 const mod = MODULES[item.mod];
                 return (
                   <div key={i} style={{ display: "flex", alignItems: "stretch", gap: 0 }}>
-                    {/* Timeline spine */}
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 40, flexShrink: 0 }}>
                       <div style={{
                         width: 28, height: 28, borderRadius: "50%",
@@ -356,14 +369,12 @@ export default function App() {
                         border: `1.5px solid ${mod.color}`,
                         display: "flex", alignItems: "center", justifyContent: "center",
                         color: mod.color, fontSize: 11, fontWeight: 800,
-                        fontFamily: "'Fira Code', monospace", zIndex: 1,
-                        flexShrink: 0,
+                        fontFamily: "'Fira Code', monospace", zIndex: 1, flexShrink: 0,
                       }}>{item.step}</div>
                       {i < CALL_SEQUENCE.length - 1 && (
                         <div style={{ width: 2, flex: 1, background: "rgba(255,255,255,0.07)", minHeight: 12 }} />
                       )}
                     </div>
-                    {/* Card */}
                     <div style={{
                       flex: 1, marginLeft: 12, marginBottom: 10,
                       background: "rgba(15,23,42,0.6)",
@@ -379,8 +390,7 @@ export default function App() {
                         <span style={{
                           background: `${mod.color}18`, border: `1px solid ${mod.color}40`,
                           borderRadius: 4, padding: "1px 7px",
-                          color: mod.color, fontSize: 9, fontFamily: "'Fira Code', monospace",
-                          letterSpacing: 1,
+                          color: mod.color, fontSize: 9, fontFamily: "'Fira Code', monospace", letterSpacing: 1,
                         }}>{mod.label}</span>
                       </div>
                       <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 11 }}>{item.note}</div>
@@ -399,11 +409,10 @@ export default function App() {
               Files generated after simulation
             </div>
 
-            {/* Group by folder */}
             {[
-              { dir: "automated_dataset/", label: "Structured Dataset (SWaT-style)", icon: "📦" },
-              { dir: "logs/",              label: "Event Log",                        icon: "📋" },
-              { dir: "data/",             label: "Legacy Per-Signal CSVs",            icon: "📊" },
+              { dir: "automated_dataset/", label: "Structured Dataset (physics + labels)", icon: "📦" },
+              { dir: "logs/",              label: "Event Log",                              icon: "📋" },
+              { dir: "middleware/logs/",   label: "Protocol Layer Dataset",                 icon: "🔌" },
             ].map(group => {
               const files = OUTPUTS.filter(o => o.dir === group.dir);
               return (
@@ -415,19 +424,18 @@ export default function App() {
                     </span>
                     <span style={{ color: "rgba(255,255,255,0.2)", fontSize: 11 }}>— {group.label}</span>
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 8, paddingLeft: 24 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 8, paddingLeft: 24 }}>
                     {files.map(f => (
                       <div key={f.file} style={{
                         background: `${f.color}0a`,
                         border: `1px solid ${f.color}30`,
                         borderRadius: 8, padding: "10px 14px",
-                        display: "flex", alignItems: "center", gap: 10,
                       }}>
-                        <div style={{ width: 6, height: 6, borderRadius: "50%", background: f.color, flexShrink: 0 }} />
-                        <div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                          <div style={{ width: 6, height: 6, borderRadius: "50%", background: f.color, flexShrink: 0 }} />
                           <div style={{ color: f.color, fontFamily: "'Fira Code', monospace", fontSize: 11, fontWeight: 700 }}>{f.file}</div>
-                          <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 10, marginTop: 2 }}>{f.dir}</div>
                         </div>
+                        <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 10, paddingLeft: 14 }}>{f.note}</div>
                       </div>
                     ))}
                   </div>
@@ -442,22 +450,22 @@ export default function App() {
               borderRadius: 10, padding: "16px 20px", marginTop: 8,
             }}>
               <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 11, marginBottom: 12, fontFamily: "'Fira Code', monospace", letterSpacing: 1 }}>
-                MASTER DATASET COLUMNS
+                MASTER DATASET COLUMNS (physics stream)
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
                 {[
-                  ["Timestamp",       "#94a3b8", "datetime per step"],
-                  ["S1..D2_pressure_bar", "#38bdf8", "8 nodal pressures"],
-                  ["E1..E7_flow_kgs", "#38bdf8", "7 edge flows"],
-                  ["*_temp_K",        "#fb923c", "8 node temperatures"],
-                  ["*_density",       "#fb923c", "8 node densities"],
-                  ["COMP_Power/Head/Eff/Ratio","#a78bfa","4 compressor metrics"],
-                  ["VALVE_CMD",       "#34d399", "valve open/close"],
-                  ["*_ekf_residual",  "#f59e0b", "8 EKF residuals"],
-                  ["SRC_Pressure_bar","#e879f9", "source pressure (post-attack)"],
-                  ["*_plc_p / *_plc_q","#94a3b8","PLC sensor bus values"],
-                  ["ATTACK_ID",       "#f87171", "integer label"],
-                  ["ATTACK_NAME / MITRE_ID","#f87171","string labels"],
+                  ["Timestamp",              "#94a3b8", "datetime per step"],
+                  ["p_S1..p_D6 (20×)",       "#38bdf8", "20 nodal pressures bar"],
+                  ["q_E1..q_E20 (20×)",      "#38bdf8", "20 edge flows kg/s"],
+                  ["T_S1..T_D6 (20×)",       "#fb923c", "20 node temperatures K"],
+                  ["rho_* (20×)",            "#fb923c", "20 node densities kg/m³"],
+                  ["CS1/CS2 W/H/eta/ratio",  "#a78bfa", "dual compressor metrics"],
+                  ["PRS1/PRS2 throttle",     "#22d3ee", "pressure regulating stations"],
+                  ["sto_inventory",          "#60a5fa", "storage cavern fill fraction"],
+                  ["linepack (20×)",         "#60a5fa", "per-segment line pack kg"],
+                  ["ekf_residual_p/q",       "#f59e0b", "40-state EKF residuals"],
+                  ["ATTACK_ID / MITRE_ID",   "#f87171", "integer + string labels"],
+                  ["plc_p / plc_q",          "#94a3b8", "PLC sensor bus snapshot"],
                 ].map(([col, color, note]) => (
                   <div key={col} style={{
                     background: `${color}08`, border: `1px solid ${color}25`,
@@ -465,6 +473,122 @@ export default function App() {
                   }}>
                     <div style={{ color, fontFamily: "'Fira Code', monospace", fontSize: 10, fontWeight: 700 }}>{col}</div>
                     <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 10, marginTop: 2 }}>{note}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ marginTop: 14, padding: "12px 14px", background: "rgba(34,211,238,0.05)", border: "1px solid rgba(34,211,238,0.2)", borderRadius: 8 }}>
+                <div style={{ color: "#22d3ee", fontFamily: "'Fira Code', monospace", fontSize: 10, fontWeight: 700, marginBottom: 6 }}>
+                  PROTOCOL DATASET COLUMNS (middleware/logs/pipeline_data_*.csv · 150 cols)
+                </div>
+                <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 10, lineHeight: 1.7 }}>
+                  timestamp_ms · datetime_utc · cycle &nbsp;|&nbsp;
+                  20× p_*_bar (eng) · 20× q_*_kgs (eng) · 20× T_*_K (eng) · demand_scalar &nbsp;|&nbsp;
+                  9× actuator_eng · 7× coil bool &nbsp;|&nbsp;
+                  61× sensor_raw INT · 9× actuator_raw INT
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB: CPS STACK */}
+        {tab === "stack" && (
+          <div>
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: 2, marginBottom: 16, fontFamily: "'Fira Code', monospace" }}>
+              Full CPS Communication Stack
+            </div>
+
+            {/* MATLAB layer */}
+            {[
+              {
+                label: "MATLAB — Physics & Dataset Layer",
+                color: "#f59e0b",
+                items: [
+                  "20-node Peng-Robinson gas network (Darcy-Weisbach + hydrostatic)",
+                  "Dual compressor CS1/CS2, PRS1/PRS2, storage cavern, 20 edges",
+                  "10 attack scenarios A1–A10 with MITRE ATT&CK labels",
+                  "Extended Kalman Filter (40-state: 20p + 20q)",
+                  "Exports master_dataset.csv (physics + labels)",
+                  "UDP TX port 5005 → gateway  |  UDP RX port 6006 ← gateway",
+                ],
+              },
+              {
+                label: "Python Gateway — Protocol Bridge",
+                color: "#22d3ee",
+                items: [
+                  "gateway.py: MATLAB UDP ↔ Modbus TCP bridge (CodesysModbus + S7PLC classes)",
+                  "Receives 61×float64 (488 bytes) from MATLAB, scales to INT, writes FC16",
+                  "Reads FC3 (9 actuator registers) + FC1 (7 coils), sends 16×float64 to MATLAB",
+                  "data_logger.py: standalone 150-col CSV logger at 10 Hz",
+                  "diagnostic.py: full connection test (TCP + write + read + coils)",
+                  "config.yaml: plc.type = modbus | s7  (one line swap for S7-1200)",
+                ],
+              },
+              {
+                label: "CODESYS SoftPLC — Control Layer",
+                color: "#a78bfa",
+                items: [
+                  "ModbusTCP_Server_Device @ 127.0.0.1:1502, unit=1",
+                  "70 holding registers: addr 0–60 sensor inputs, addr 100–108 actuator outputs",
+                  "7 coils: emergency_shutdown, cs1/cs2_alarm, sto_inject/withdraw, prs1/2_active",
+                  "All variables INT (no REAL) — scaling: bar×100, kg/s×100, K×10, ratio×1000",
+                  "PLC_PRG: dual PID (CS1→D1@30bar, CS2→D3@25bar), valve interlocks, safety trip",
+                  "Hardware swap: change config.yaml host + type for Siemens S7-1200",
+                ],
+              },
+            ].map((layer, i) => (
+              <div key={i} style={{
+                marginBottom: 14,
+                background: `${layer.color}06`,
+                border: `1px solid ${layer.color}30`,
+                borderLeft: `4px solid ${layer.color}`,
+                borderRadius: 10,
+                padding: "14px 18px",
+              }}>
+                <div style={{ color: layer.color, fontFamily: "'Fira Code', monospace", fontSize: 12, fontWeight: 800, marginBottom: 10 }}>
+                  {layer.label}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {layer.items.map((item, j) => (
+                    <div key={j} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                      <div style={{ width: 4, height: 4, borderRadius: "50%", background: layer.color, marginTop: 6, flexShrink: 0 }} />
+                      <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 11, lineHeight: 1.6 }}>{item}</div>
+                    </div>
+                  ))}
+                </div>
+                {i < 2 && (
+                  <div style={{ textAlign: "center", marginTop: 12, color: layer.color, fontSize: 18, opacity: 0.5 }}>↕</div>
+                )}
+              </div>
+            ))}
+
+            {/* Modbus register quick ref */}
+            <div style={{
+              background: "rgba(15,23,42,0.8)",
+              border: "1px solid rgba(255,255,255,0.07)",
+              borderRadius: 10, padding: "14px 18px",
+            }}>
+              <div style={{ color: "rgba(255,255,255,0.4)", fontFamily: "'Fira Code', monospace", fontSize: 10, marginBottom: 10, letterSpacing: 1 }}>
+                MODBUS REGISTER MAP (0-based CODESYS addresses)
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                {[
+                  ["Addr 0–19",   "#38bdf8", "p_S1..p_D6 (bar×100)"],
+                  ["Addr 20–39",  "#38bdf8", "q_E1..q_E20 (kg/s×100)"],
+                  ["Addr 40–59",  "#fb923c", "T_S1..T_D6 (K×10)"],
+                  ["Addr 60",     "#e879f9", "demand_scalar (×1000)"],
+                  ["Addr 61–99",  "#475569", "RESERVED"],
+                  ["Addr 100–101","#a78bfa", "cs1/cs2_ratio_cmd (×1000)"],
+                  ["Addr 102–104","#60a5fa", "valve_E8/E14/E15_cmd (×1000)"],
+                  ["Addr 105–106","#34d399", "prs1/prs2_setpoint (bar×100)"],
+                  ["Addr 107–108","#fb923c", "cs1/cs2_power_kW (kW×10)"],
+                  ["Coils 0–2",   "#f87171", "e_shutdown, cs1/cs2_alarm"],
+                  ["Coils 3–4",   "#60a5fa", "sto_inject/withdraw_active"],
+                  ["Coils 5–6",   "#34d399", "prs1/prs2_active"],
+                ].map(([addr, color, desc]) => (
+                  <div key={addr} style={{ background: `${color}08`, border: `1px solid ${color}25`, borderRadius: 6, padding: "7px 10px" }}>
+                    <div style={{ color, fontFamily: "'Fira Code', monospace", fontSize: 10, fontWeight: 700 }}>{addr}</div>
+                    <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 10, marginTop: 2 }}>{desc}</div>
                   </div>
                 ))}
               </div>

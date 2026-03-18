@@ -1,20 +1,8 @@
 """
 gateway.py — Gas Pipeline Gateway: MATLAB <-> CODESYS Modbus TCP
 ================================================================
-Holding registers : 67 total
-  Sensor inputs   : 60 (addr 0-59,   Modbus 40001-40060)
-  Actuator outputs:  7 (addr 100-106, Modbus 40101-40107)
-Coils             :  3 (addr 0-2,    Modbus 00001-00003)
-
-All values are INT in CODESYS. MATLAB decodes:
-  pressure  = int16 / 100   (bar)
-  flow      = int16 / 100   (kg/s)
-  temp      = int16 / 10    (K)
-  ratio     = int16 / 1000
-  valve     = int16 / 1000  (0=closed, 1=open)
-
-Install: pip install pymodbus pyyaml
-Run:     python gateway.py
+Synchronisation: REQUEST-RESPONSE — Python blocks on mat.receive(),
+processes, replies immediately. MATLAB send→receive = one step.
 """
 
 import socket, struct, yaml, time, logging, csv, os, argparse
@@ -29,214 +17,109 @@ NODE_NAMES = ['S1','J1','CS1','J2','J3','J4','CS2','J5','J6','PRS1',
 EDGE_NAMES = ['E1','E2','E3','E4','E5','E6','E7','E8','E9','E10',
               'E11','E12','E13','E14','E15','E16','E17','E18','E19','E20']
 
-# Register addresses (0-based CODESYS = Modbus - 40001)
-PRESSURE_ADDR  = 0    # 20 registers  addr 0-19
-FLOW_ADDR      = 20   # 20 registers  addr 20-39
-TEMP_ADDR      = 40   # 20 registers  addr 40-59
-ACTUATOR_ADDR  = 100  # 7 registers   addr 100-106
-COIL_ADDR      = 0    # 3 coils       addr 0-2
+ACTUATOR_NAMES  = ['cs1_ratio_cmd','cs2_ratio_cmd',
+                   'valve_E8_cmd','valve_E14_cmd','valve_E15_cmd',
+                   'prs1_setpoint','prs2_setpoint',
+                   'cs1_power_kW','cs2_power_kW']
+ACTUATOR_SCALES = [1000, 1000, 1000, 1000, 1000, 100, 100, 10, 10]
+ACTUATOR_UNITS  = ['ratio','ratio','0-1','0-1','0-1','bar','bar','kW','kW']
 
-ACTUATOR_NAMES = ['cs1_ratio_cmd','cs2_ratio_cmd',
-                  'valve_E8_cmd','valve_E14_cmd','valve_E15_cmd',
-                  'prs1_setpoint','prs2_setpoint']
-COIL_NAMES     = ['emergency_shutdown','cs1_alarm','cs2_alarm']
+COIL_NAMES = ['emergency_shutdown','cs1_alarm','cs2_alarm',
+              'sto_inject_active','sto_withdraw_active',
+              'prs1_active','prs2_active']
 
-# Scales for encoding (MATLAB value * scale = INT register value)
-P_SCALE = 100    # bar   -> INT
-Q_SCALE = 100    # kg/s  -> INT
-T_SCALE = 10     # K     -> INT
+ACTUATOR_DEFAULTS = {
+    'cs1_ratio_cmd': 1250, 'cs2_ratio_cmd': 1150,
+    'valve_E8_cmd': 1000,  'valve_E14_cmd': 1000, 'valve_E15_cmd': 1000,
+    'prs1_setpoint': 3000, 'prs2_setpoint': 2500,
+    'cs1_power_kW': 0,     'cs2_power_kW': 0,
+}
+COIL_DEFAULTS = {n: False for n in COIL_NAMES}
 
 
 def load_config(path='config.yaml') -> dict:
     with open(path) as f:
         return yaml.safe_load(f)
 
-
-def to_int16(val: float, scale: int) -> int:
-    """Convert engineering float to signed INT16 register value."""
-    raw = int(round(val * scale))
-    return max(-32768, min(32767, raw))
-
-def from_int16(raw: int, scale: int) -> float:
-    """Convert signed INT16 register value to engineering float."""
-    if raw > 32767: raw -= 65536   # unsigned -> signed
-    return raw / scale
+def to_signed(val: int) -> int:
+    return val - 65536 if val > 32767 else val
 
 
 # =========================================================================
-# CODESYS Modbus TCP
+# Modbus client
 # =========================================================================
-class CodesysModbus:
+class ModbusGateway:
 
-    def __init__(self, config):
-        self.host    = config['plc'].get('host', '127.0.0.1')
-        self.port    = config['plc'].get('port', 502)
-        self.unit_id = config['plc'].get('unit_id', 1)
+    def __init__(self, host, port, unit_id):
+        self.host    = host
+        self.port    = port
+        self.unit_id = unit_id
         self._client = None
 
     def connect(self) -> bool:
-        try:
-            from pymodbus.client import ModbusTcpClient
-            self._client = ModbusTcpClient(self.host, port=self.port, timeout=3)
-            ok = self._client.connect()
-            if ok:
-                logger.info(f'Modbus connected  {self.host}:{self.port}  unit={self.unit_id}')
-            else:
-                logger.error(f'Modbus refused at {self.host}:{self.port}')
-                logger.error('Check CODESYS: runtime started, PLC running (F5), port=502')
-            return ok
-        except ImportError:
-            raise ImportError('pip install pymodbus')
-        except Exception as e:
-            logger.error(f'Modbus connect: {e}')
-            return False
+        from pymodbus.client import ModbusTcpClient
+        self._client = ModbusTcpClient(self.host, port=self.port, timeout=2)
+        ok = self._client.connect()
+        if ok:
+            logger.info(f'Modbus connected  {self.host}:{self.port}  unit={self.unit_id}')
+        return ok
 
     def disconnect(self):
         if self._client:
             try: self._client.close()
-            except Exception: pass
+            except: pass
 
     def is_connected(self) -> bool:
         return self._client is not None and self._client.is_socket_open()
 
-    def write_pressures(self, pressures: list) -> bool:
-        return self._write_block(PRESSURE_ADDR, pressures, P_SCALE)
-
-    def write_flows(self, flows: list) -> bool:
-        return self._write_block(FLOW_ADDR, flows, Q_SCALE)
-
-    def write_temps(self, temps: list) -> bool:
-        return self._write_block(TEMP_ADDR, temps, T_SCALE)
-
     def write_sensors(self, sensor_ints: dict) -> bool:
-        """Write all sensor INT values from MATLAB UDP packet.
-        sensor_ints keys: p_S1..p_D6, q_E1..q_E20, T_S1..T_D6, demand_scalar
-        Values are already scaled INTs — write directly as registers.
-        """
-        if not self.is_connected(): return False
+        if not self.is_connected():
+            return False
         try:
-            # Build 61-register block (addr 0-60)
             regs = []
             for name in NODE_NAMES:
-                regs.append(int(sensor_ints.get(f'p_{name}', 5000)) & 0xFFFF)
+                regs.append(sensor_ints.get(f'p_{name}', 5000) & 0xFFFF)
             for name in EDGE_NAMES:
-                regs.append(int(sensor_ints.get(f'q_{name}', 0)) & 0xFFFF)
+                regs.append(sensor_ints.get(f'q_{name}', 0) & 0xFFFF)
             for name in NODE_NAMES:
-                regs.append(int(sensor_ints.get(f'T_{name}', 2850)) & 0xFFFF)
-            regs.append(int(sensor_ints.get('demand_scalar', 750)) & 0xFFFF)
-            result = self._client.write_registers(0, regs, device_id=self.unit_id)
-            return not result.isError()
+                regs.append(sensor_ints.get(f'T_{name}', 2850) & 0xFFFF)
+            regs.append(sensor_ints.get('demand_scalar', 750) & 0xFFFF)
+            r = self._client.write_registers(0, regs, device_id=self.unit_id)
+            return not r.isError()
         except Exception as e:
             logger.warning(f'write_sensors: {e}')
             return False
 
-    def _write_block(self, start_addr: int, values: list, scale: int) -> bool:
-        if not self.is_connected(): return False
-        try:
-            regs = [to_int16(v, scale) & 0xFFFF for v in values]
-            result = self._client.write_registers(start_addr, regs,
-                                                  device_id=self.unit_id)
-            return not result.isError()
-        except Exception as e:
-            logger.warning(f'Modbus write block @{start_addr}: {e}')
-            return False
-
     def read_actuators(self) -> dict:
-        """Read 7 actuator registers addr 100-106 (FC3)."""
-        if not self.is_connected(): return {}
+        if not self.is_connected():
+            return dict(ACTUATOR_DEFAULTS)
         try:
-            rr = self._client.read_holding_registers(ACTUATOR_ADDR, count=7,
-                                                     device_id=self.unit_id)
-            if rr.isError():
-                logger.warning(f'FC3 read error: {rr}')
-                return {}
-            scales = [1000, 1000, 1000, 1000, 1000, 100, 100]
-            return {name: from_int16(rr.registers[i], scales[i])
+            r = self._client.read_holding_registers(100, count=9,
+                                                    device_id=self.unit_id)
+            if r.isError():
+                return dict(ACTUATOR_DEFAULTS)
+            return {name: to_signed(r.registers[i])
                     for i, name in enumerate(ACTUATOR_NAMES)}
         except Exception as e:
-            logger.warning(f'Modbus actuator read: {e}')
-            return {}
+            logger.warning(f'read_actuators: {e}')
+            return dict(ACTUATOR_DEFAULTS)
 
     def read_coils(self) -> dict:
-        """Read 3 coils addr 0-2 (FC1)."""
-        if not self.is_connected(): return {}
+        if not self.is_connected():
+            return dict(COIL_DEFAULTS)
         try:
-            rr = self._client.read_coils(COIL_ADDR, count=3, device_id=self.unit_id)
-            if rr.isError(): return {}
-            return {name: bool(rr.bits[i]) for i, name in enumerate(COIL_NAMES)}
+            r = self._client.read_coils(0, count=7, device_id=self.unit_id)
+            if r.isError():
+                return dict(COIL_DEFAULTS)
+            return {name: bool(r.bits[i]) for i, name in enumerate(COIL_NAMES)}
         except Exception as e:
-            logger.warning(f'Modbus coil read: {e}')
-            return {}
+            logger.warning(f'read_coils: {e}')
+            return dict(COIL_DEFAULTS)
 
-
-# =========================================================================
-# Siemens S7-1200 (swap via config.yaml plc.type = "s7")
-# =========================================================================
-class S7PLC:
-
-    def __init__(self, config):
-        self.host         = config['plc']['host']
-        self.rack         = config['plc'].get('rack', 0)
-        self.slot         = config['plc'].get('slot', 1)
-        self.db_sensors   = config['plc'].get('db_sensors', 1)
-        self.db_actuators = config['plc'].get('db_actuators', 2)
-        self._client      = None
-
-    def connect(self) -> bool:
-        try:
-            import snap7
-            self._client = snap7.client.Client()
-            self._client.connect(self.host, self.rack, self.slot)
-            ok = self._client.get_connected()
-            if ok: logger.info(f'S7 connected  {self.host}')
-            return ok
-        except ImportError:
-            raise ImportError('pip install python-snap7')
-
-    def disconnect(self):
-        if self._client: self._client.disconnect()
-
-    def is_connected(self) -> bool:
-        return self._client is not None and self._client.get_connected()
-
-    def write_pressures(self, pressures):
-        return self._write_int_block(0, pressures, P_SCALE)
-
-    def write_flows(self, flows):
-        return self._write_int_block(40, flows, Q_SCALE)
-
-    def write_temps(self, temps):
-        return self._write_int_block(80, temps, T_SCALE)
-
-    def _write_int_block(self, byte_offset, values, scale):
-        if not self.is_connected(): return False
-        try:
-            buf = bytearray(len(values) * 2)
-            for i, v in enumerate(values):
-                raw = to_int16(v, scale)
-                buf[i*2]   = (raw >> 8) & 0xFF
-                buf[i*2+1] = raw & 0xFF
-            self._client.db_write(self.db_sensors, byte_offset, buf)
-            return True
-        except Exception as e:
-            logger.warning(f'S7 write: {e}')
-            return False
-
-    def read_actuators(self):
-        if not self.is_connected(): return {}
-        try:
-            buf = self._client.db_read(self.db_actuators, 0, 14)
-            scales = [1000, 1000, 1000, 1000, 1000, 100, 100]
-            result = {}
-            for i, name in enumerate(ACTUATOR_NAMES):
-                raw = (buf[i*2] << 8) | buf[i*2+1]
-                result[name] = from_int16(raw, scales[i])
-            return result
-        except Exception as e:
-            logger.warning(f'S7 read: {e}')
-            return {}
-
-    def read_coils(self): return {}
+    def reconnect(self):
+        self.disconnect()
+        time.sleep(1)
+        return self.connect()
 
 
 # =========================================================================
@@ -244,61 +127,53 @@ class S7PLC:
 # =========================================================================
 class MatlabUDP:
 
-    def __init__(self, config):
-        m = config['matlab']
+    SEND_BYTES = 61 * 8   # 488 bytes  MATLAB → Python
+    RECV_BYTES = 16 * 8   # 128 bytes  Python → MATLAB
+
+    def __init__(self, cfg):
+        m = cfg['matlab']
         self._rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._rx.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._rx.bind((m['recv_ip'], m['recv_port']))
         self._rx.settimeout(m.get('timeout_s', 0.5))
-        self._tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self._tx_addr = (m['send_ip'], m['send_port'])
+        self._tx      = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._tx_ip   = m['send_ip']
+        self._tx_port = m['send_port']
+        logger.info(f'UDP RX listening on {m["recv_ip"]}:{m["recv_port"]}')
+        logger.info(f'UDP TX will reply to {m["send_ip"]}:{m["send_port"]}')
 
     def receive(self) -> dict | None:
-        """
-        Receive physics state from MATLAB.
-        Packet: 61 x float64 = 488 bytes
-          [0:19]  20 pressures  bar
-          [20:39] 20 flows      kg/s
-          [40:59] 20 temps      K
-          [60]     1 demand_scalar
-        Returns sensor_ints dict (already scaled to INT) or None on timeout.
-        """
         try:
             data, _ = self._rx.recvfrom(65535)
-            if len(data) < 488: return None
-            vals = struct.unpack('61d', data[:488])
-
-            sensor_ints = {}
+            if len(data) < self.SEND_BYTES:
+                return None
+            vals = struct.unpack('61d', data[:self.SEND_BYTES])
+            ints = {}
             for i, name in enumerate(NODE_NAMES):
-                sensor_ints[f'p_{name}'] = int(round(vals[i]    * 100))
+                ints[f'p_{name}'] = int(round(vals[i]    * 100))
             for i, name in enumerate(EDGE_NAMES):
-                sensor_ints[f'q_{name}'] = int(round(vals[20+i] * 100))
+                ints[f'q_{name}'] = int(round(vals[20+i] * 100))
             for i, name in enumerate(NODE_NAMES):
-                sensor_ints[f'T_{name}'] = int(round(vals[40+i] * 10))
-            sensor_ints['demand_scalar'] = int(round(vals[60] * 1000))
-            return sensor_ints
+                ints[f'T_{name}'] = int(round(vals[40+i] * 10))
+            ints['demand_scalar'] = int(round(vals[60] * 1000))
+            return ints
         except socket.timeout:
             return None
-        except Exception as ex:
-            logger.error(f'UDP recv: {ex}')
+        except Exception as e:
+            logger.error(f'UDP receive error: {e}')
             return None
 
-    def send(self, actuator_ints: dict, coils: dict):
-        """
-        Send PLC actuator raw INTs + coil bools to MATLAB.
-        Packet: 16 x float64 = 128 bytes
-          [0:8]  9 actuator raw INT values (MATLAB divides by scale)
-          [9:15] 7 coil bool values (0.0 or 1.0)
-        """
+    def send(self, act_ints: dict, coils: dict):
         vals = [
-            float(actuator_ints.get('cs1_ratio_cmd', 1250)),
-            float(actuator_ints.get('cs2_ratio_cmd', 1150)),
-            float(actuator_ints.get('valve_E8_cmd',  1000)),
-            float(actuator_ints.get('valve_E14_cmd', 1000)),
-            float(actuator_ints.get('valve_E15_cmd', 1000)),
-            float(actuator_ints.get('prs1_setpoint', 3000)),
-            float(actuator_ints.get('prs2_setpoint', 2500)),
-            float(actuator_ints.get('cs1_power_kW',     0)),
-            float(actuator_ints.get('cs2_power_kW',     0)),
+            float(act_ints.get('cs1_ratio_cmd',  1250)),
+            float(act_ints.get('cs2_ratio_cmd',  1150)),
+            float(act_ints.get('valve_E8_cmd',   1000)),
+            float(act_ints.get('valve_E14_cmd',  1000)),
+            float(act_ints.get('valve_E15_cmd',  1000)),
+            float(act_ints.get('prs1_setpoint',  3000)),
+            float(act_ints.get('prs2_setpoint',  2500)),
+            float(act_ints.get('cs1_power_kW',      0)),
+            float(act_ints.get('cs2_power_kW',      0)),
             float(coils.get('emergency_shutdown',  False)),
             float(coils.get('cs1_alarm',           False)),
             float(coils.get('cs2_alarm',           False)),
@@ -307,14 +182,18 @@ class MatlabUDP:
             float(coils.get('prs1_active',         False)),
             float(coils.get('prs2_active',         False)),
         ]
-        self._tx.sendto(struct.pack(f'{len(vals)}d', *vals), self._tx_addr)
+        self._tx.sendto(struct.pack(f'{len(vals)}d', *vals),
+                        (self._tx_ip, self._tx_port))
 
     def close(self):
-        self._rx.close(); self._tx.close()
+        try: self._rx.close()
+        except: pass
+        try: self._tx.close()
+        except: pass
 
 
 # =========================================================================
-# Transaction logger — the protocol-layer dataset
+# Transaction logger  ← method names fixed
 # =========================================================================
 class TransactionLogger:
 
@@ -324,46 +203,41 @@ class TransactionLogger:
         path = os.path.join(log_dir, f'modbus_transactions_{ts}.csv')
         self._fh = open(path, 'w', newline='')
         self._w  = csv.writer(self._fh)
-        self._w.writerow(['timestamp_ms','fc','direction',
-                          'modbus_addr','variable','int16_raw','eng_value','unit'])
+        self._w.writerow(['timestamp_ms','fc','direction','modbus_addr',
+                          'variable','int16_raw','eng_value','unit'])
         logger.info(f'Transaction log: {path}')
 
-    def log_pressures(self, pressures):
+    def log_sensors(self, sensor_ints: dict):
+        """Log all 61 sensor registers written to PLC (FC16 WRITE)."""
         ts = int(time.time() * 1000)
-        for i, (name, val) in enumerate(zip(NODE_NAMES, pressures)):
-            self._w.writerow([ts,'FC16','WRITE', 40001+i,
-                               f'p_{name}', to_int16(val, P_SCALE),
-                               f'{val:.2f}', 'bar'])
+        scales = ([100]*20) + ([100]*20) + ([10]*20) + [1000]
+        names  = ([f'p_{n}' for n in NODE_NAMES] +
+                  [f'q_{e}' for e in EDGE_NAMES] +
+                  [f'T_{n}' for n in NODE_NAMES] +
+                  ['demand_scalar'])
+        units  = (['bar']*20) + (['kg/s']*20) + (['K']*20) + ['']
+        for i, (name, scale, unit) in enumerate(zip(names, scales, units)):
+            raw = sensor_ints.get(name, 0)
+            eng = raw / scale
+            self._w.writerow([ts, 'FC16', 'WRITE', 40001+i,
+                               name, raw, f'{eng:.4f}', unit])
 
-    def log_flows(self, flows):
+    def log_actuators(self, act_ints: dict):
+        """Log 9 actuator registers read from PLC (FC3 READ)."""
         ts = int(time.time() * 1000)
-        for i, (name, val) in enumerate(zip(EDGE_NAMES, flows)):
-            self._w.writerow([ts,'FC16','WRITE', 40021+i,
-                               f'q_{name}', to_int16(val, Q_SCALE),
-                               f'{val:.3f}', 'kg/s'])
+        for i, (name, scale, unit) in enumerate(
+                zip(ACTUATOR_NAMES, ACTUATOR_SCALES, ACTUATOR_UNITS)):
+            raw = act_ints.get(name, 0)
+            eng = raw / scale
+            self._w.writerow([ts, 'FC3', 'READ', 40101+i,
+                               name, raw, f'{eng:.4f}', unit])
 
-    def log_temps(self, temps):
-        ts = int(time.time() * 1000)
-        for i, (name, val) in enumerate(zip(NODE_NAMES, temps)):
-            self._w.writerow([ts,'FC16','WRITE', 40041+i,
-                               f'T_{name}', to_int16(val, T_SCALE),
-                               f'{val:.1f}', 'K'])
-
-    def log_actuators(self, actuators):
-        ts = int(time.time() * 1000)
-        scales = [1000, 1000, 1000, 1000, 1000, 100, 100]
-        units  = ['ratio','ratio','0/1','0/1','0/1','bar','bar']
-        for i, name in enumerate(ACTUATOR_NAMES):
-            val = actuators.get(name, 0)
-            self._w.writerow([ts,'FC3','READ', 40101+i,
-                               name, to_int16(val, scales[i]),
-                               f'{val:.4f}', units[i]])
-
-    def log_coils(self, coils):
+    def log_coils(self, coils: dict):
+        """Log 7 coil values read from PLC (FC1 READ)."""
         ts = int(time.time() * 1000)
         for i, name in enumerate(COIL_NAMES):
             val = coils.get(name, False)
-            self._w.writerow([ts,'FC1','READ', 1+i,
+            self._w.writerow([ts, 'FC1', 'READ', 1+i,
                                name, int(val), str(val), 'BOOL'])
 
     def flush(self): self._fh.flush()
@@ -371,90 +245,90 @@ class TransactionLogger:
 
 
 # =========================================================================
-# Main loop
+# Main loop — request-response, synchronised to MATLAB
 # =========================================================================
 def run_gateway(config: dict):
 
-    plc_type = config['plc'].get('type', 'modbus').lower()
-    if plc_type in ('modbus', 'codesys'):
-        plc = CodesysModbus(config)
-        logger.info('PLC: CODESYS Modbus TCP')
-    elif plc_type == 's7':
-        plc = S7PLC(config)
-        logger.info(f'PLC: Siemens S7  {config["plc"]["host"]}')
-    else:
-        raise ValueError(f'Unknown plc.type: {plc_type}')
-
-    matlab = MatlabUDP(config)
-    txlog  = TransactionLogger(config.get('log_dir', 'logs'))
+    plc_cfg = config['plc']
+    plc   = ModbusGateway(plc_cfg['host'], plc_cfg['port'], plc_cfg['unit_id'])
+    mat   = MatlabUDP(config)
+    txlog = TransactionLogger(config.get('log_dir', 'logs'))
 
     while not plc.connect():
-        logger.info('PLC not ready — retrying in 3s...')
+        logger.warning('PLC not ready — retrying in 3s...')
         time.sleep(3)
 
-    cycle_s   = config.get('cycle_time_s', 0.1)
-    log_every = config.get('log_every_n_cycles', 10)
-    stats     = {'cycles':0, 'plc_errors':0, 'timeouts':0, 'reconnects':0}
-    last_act   = {name: 1250 if 'ratio' in name else 1000
-                  for name in ACTUATOR_NAMES}
-    last_coils = {name: False for name in COIL_NAMES}
+    log_every  = config.get('log_every_n_cycles', 10)
+    stats      = {'cycles':0, 'plc_errors':0, 'timeouts':0, 'reconnects':0}
+    last_act   = dict(ACTUATOR_DEFAULTS)
+    last_coils = dict(COIL_DEFAULTS)
 
-    logger.info('Gateway running. Ctrl+C to stop.')
-    logger.info(f'Registers: 60 sensor inputs (40001-40060) + '
-                f'7 actuator outputs (40101-40107) + 3 coils (00001-00003)')
+    logger.info('Gateway ready — waiting for MATLAB UDP packets on port 5005')
+    logger.info('Timing: REQUEST-RESPONSE (synchronised to MATLAB)')
+    logger.info('Press Ctrl+C to stop.')
 
     try:
         while True:
-            t0 = time.time()
 
-            if not plc.is_connected():
-                logger.warning('PLC disconnected — reconnecting...')
-                time.sleep(2)
-                plc.connect()
-                stats['reconnects'] += 1
+            # 1. Block until MATLAB sends a physics packet
+            sensor_ints = mat.receive()
 
-            sensor = matlab.receive()
-            do_log = (stats['cycles'] % log_every == 0)
-
-            if sensor is None:
+            if sensor_ints is None:
                 stats['timeouts'] += 1
-            else:
-                # sensor is already a dict of raw INTs keyed by variable name
-                ok = plc.write_sensors(sensor)
-                if not ok: stats['plc_errors'] += 1
+                if stats['timeouts'] % 20 == 0:
+                    elapsed = stats['timeouts'] * config['matlab'].get('timeout_s', 0.5)
+                    logger.info(f'Waiting for MATLAB... ({elapsed:.0f}s elapsed, '
+                                f'{stats["timeouts"]} timeouts)')
+                continue
 
-                if do_log:
-                    txlog.log_sensors(sensor)
+            # 2. Write sensor values to PLC
+            ok = plc.write_sensors(sensor_ints)
+            if not ok:
+                stats['plc_errors'] += 1
+                if not plc.is_connected():
+                    logger.warning('PLC disconnected — reconnecting...')
+                    plc.reconnect()
+                    stats['reconnects'] += 1
 
+            # 3. Read PLC actuator outputs
             act   = plc.read_actuators()
             coils = plc.read_coils()
             if act:   last_act   = act
             if coils: last_coils = coils
-            matlab.send(last_act, last_coils)
 
-            if do_log and act:
+            # 4. Reply to MATLAB IMMEDIATELY (synchronisation point)
+            mat.send(last_act, last_coils)
+
+            # 5. Log (every N cycles, AFTER reply so latency is unaffected)
+            stats['cycles'] += 1
+            c = stats['cycles']
+
+            if c % log_every == 0:
+                txlog.log_sensors(sensor_ints)
                 txlog.log_actuators(last_act)
                 txlog.log_coils(last_coils)
                 txlog.flush()
 
-            stats['cycles'] += 1
-            if stats['cycles'] % 1000 == 0:
-                logger.info(f'Cycles={stats["cycles"]}  '
-                            f'Errors={stats["plc_errors"]}  '
-                            f'Timeouts={stats["timeouts"]}  '
-                            f'Reconnects={stats["reconnects"]}')
-
-            time.sleep(max(0, cycle_s - (time.time() - t0)))
+            if c % 1000 == 0:
+                p_s1  = sensor_ints.get('p_S1',  5000) / 100.0
+                p_d1  = sensor_ints.get('p_D1',  0)    / 100.0
+                r_cs1 = last_act.get('cs1_ratio_cmd', 1250) / 1000.0
+                logger.info(f'Step {c:6d}  p_S1={p_s1:.1f}bar  p_D1={p_d1:.1f}bar  '
+                            f'cs1_ratio={r_cs1:.3f}')
 
     except KeyboardInterrupt:
-        logger.info('Stopped.')
+        logger.info('Keyboard interrupt — stopping gateway.')
     finally:
-        matlab.close(); plc.disconnect(); txlog.close()
-        logger.info(f'Total cycles: {stats["cycles"]}')
+        txlog.close()
+        mat.close()
+        plc.disconnect()
+        logger.info(f'Gateway stopped. Cycles={stats["cycles"]}  '
+                    f'PLCerrors={stats["plc_errors"]}  '
+                    f'Timeouts={stats["timeouts"]}')
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description='Gas Pipeline Modbus Gateway')
     ap.add_argument('--config', default='config.yaml')
     args = ap.parse_args()
     run_gateway(load_config(args.config))

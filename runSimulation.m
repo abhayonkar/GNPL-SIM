@@ -1,77 +1,90 @@
 function [params, state, comp1, comp2, prs1, prs2, ekf, plc, logs] = runSimulation( ...
         cfg, params, state, comp1, comp2, prs1, prs2, ekf, plc, logs, ...
         N, src_p1, src_p2, demand, schedule)
-% runSimulation  Main simulation loop for 20-node gas pipeline network.
+% runSimulation  Main simulation loop — runs at full CPU speed.
+%
+%  TIMING MODEL:
+%    Physics advances dt = 0.1 s per step regardless of wall time.
+%    No pause(), no sleep(), no real-time pacing of any kind.
+%    Logging fires every cfg.log_every steps (e.g. every 10 steps = 1 Hz
+%    dataset rows for a 10 Hz physics simulation).
+%    Gateway exchange fires at the same cadence as logging (once per row).
+%    A 100-min simulation completes in ~seconds of wall time.
 %
 %  Per-step sequence:
-%    1.  Attack injection (A1-A4: actuator layer)
+%    1.  Attack injection (A1-A4)
 %    2.  Roughness drift AR(1)
 %    3.  Flow turbulence AR(1)
 %    4.  updateFlow    (Darcy-Weisbach + elevation + line pack)
-%    5.  updateStorage (bidirectional storage)
-%    6.  updatePressure (mass balance + acoustic noise)
+%    5.  updateStorage
+%    6.  updatePressure
 %    7.  updateCompressor CS1 + CS2
 %    8.  updatePRS PRS1 + PRS2
-%    9.  updateTemperature (JT + thermal)
+%    9.  updateTemperature
 %   10.  updateDensity (Peng-Robinson)
-%   11.  Sensor reading (multiplicative noise + floor)
+%   11.  Sensor reading
 %   12.  applySensorSpoof (A5/A6)
-%   13.  updatePLC (zone-based polling)
+%   13.  updatePLC
 %   14.  updateEKF
 %   15.  updateControlLogic
-%   16.  updateLogs
-%   17.  detectIncidents
-%   18.  Progress heartbeat
+%   16.  detectIncidents
+%   17.  [every log_every steps] gateway exchange + write dataset row
+%   18.  Progress heartbeat (every 5 simulated minutes)
 
-    dt = cfg.dt;
+    dt        = cfg.dt;
+    log_every = max(1, cfg.log_every);
 
     if ~exist('automated_dataset', 'dir'), mkdir('automated_dataset'); end
     exec_fid = fopen(fullfile('automated_dataset','execution_details.log'), 'w');
-    fprintf(exec_fid, '[INFO] Simulation started: %s\n', datestr(now));
+    fprintf(exec_fid, '[INFO] Started: %s  N=%d  log_every=%d  N_log=%d\n', ...
+            datestr(now), N, log_every, floor(N/log_every));
 
-    progress_interval = max(1, round(5*60 / dt));
+    progress_interval = max(1, round(5*60 / dt));   % heartbeat every 5 sim-min
+    use_gw   = isfield(cfg, 'use_gateway') && cfg.use_gateway;
 
     %% Persistent noise states
     turb_state     = zeros(params.nEdges, 1);
     p_acoustic     = zeros(params.nNodes, 1);
     T_turb         = zeros(params.nNodes, 1);
     rho_comp_state = 0;
+    valve_states   = ones(numel(params.valveEdges), 1);
 
-    %% Valve states (3 valves: E8, E14, E15)
-    valve_states = ones(numel(params.valveEdges), 1);
+    gw_state = initGatewayState();
+    log_k    = 0;
+    wall_t0  = tic;
 
-    logEvent('INFO', 'runSimulation', 'Entering main simulation loop', 0, dt);
+    logEvent('INFO', 'runSimulation', ...
+             sprintf('Loop start  N=%d  log_every=%d  N_log=%d', ...
+                     N, log_every, floor(N/log_every)), 0, dt);
 
     %% ================================================================
     for k = 1:N
 
-        %% 1. Attack injection (A1-A4) --------------------------------
+        %% 1. Attack injection
         aid = double(schedule.label_id(k));
         [src_p1_k, src_p2_k, comp1, comp2, plc, valve_states, demand_k] = ...
             applyAttackEffects(aid, k, dt, schedule, src_p1(k), src_p2(k), ...
                                comp1, comp2, plc, valve_states, demand(k), cfg);
-
-        % Apply source pressures
         state.p(params.sourceNodes(1)) = src_p1_k;
         state.p(params.sourceNodes(2)) = src_p2_k;
 
-        %% 2. Roughness drift AR(1) -----------------------------------
+        %% 2. Roughness AR(1)
         a_r = cfg.rough_corr;
         sig_r = cfg.rough_var_std * cfg.pipe_rough * sqrt(1 - a_r^2);
         params.rough = a_r * params.rough + sig_r * randn(params.nEdges, 1);
         params.rough = max(1e-6, params.rough);
 
-        %% 3. Flow turbulence AR(1) -----------------------------------
+        %% 3. Flow turbulence AR(1)
         a_t = cfg.flow_turb_corr;
         sig_t = cfg.flow_turb_std * sqrt(1 - a_t^2);
         turb_state = a_t * turb_state + ...
                      sig_t * abs(state.q + 1e-3) .* randn(params.nEdges, 1);
         params.turb_state = turb_state;
 
-        %% 4. Flow update (Darcy-Weisbach + elevation + line pack) ----
+        %% 4. Flow
         [state.q, state] = updateFlow(params, state, valve_states);
 
-        %% 5. A8: Pipeline leak on edge ----------------------------------
+        %% 5. A8 pipeline leak
         if aid == 8
             k_s8 = max(1, round(schedule.start_s(find(schedule.ids==8,1)) / dt));
             frac_leak = min(1, (k - k_s8)*dt / cfg.atk8_ramp_time);
@@ -79,91 +92,119 @@ function [params, state, comp1, comp2, prs1, prs2, ekf, plc, logs] = runSimulati
                                      (1 - cfg.atk8_leak_frac * frac_leak);
         end
 
-        %% 6. Storage (bidirectional) ----------------------------------
+        %% 6. Storage
         q_sto = 0;
         [state, q_sto] = updateStorage(state, params, cfg);
 
-        %% 7. Pressure update (mass balance + acoustic) ---------------
+        %% 7. Pressure
         demand_vec = zeros(params.nNodes, 1);
         demand_vec(params.demandNodes) = demand_k;
         p_prev = state.p;
         [state.p, p_acoustic] = updatePressure(params, state.p, state.q, ...
                                                demand_vec, p_acoustic, cfg);
 
-        %% 8. Compressor stations CS1 and CS2 -------------------------
+        %% 8. Compressors
         [state, comp1] = updateCompressor(state, comp1, k, cfg, 1);
         [state, comp2] = updateCompressor(state, comp2, k, cfg, 2);
 
-        %% 9. PRS1 and PRS2 -------------------------------------------
+        %% 9. PRS
         [state, prs1] = updatePRS(state, prs1, cfg);
         [state, prs2] = updatePRS(state, prs2, cfg);
 
-        %% 10. Temperature (JT + turbulent mixing) --------------------
+        %% 10. Temperature
         [state.Tgas, T_turb] = updateTemperature(params, state.Tgas, state.q, ...
                                                   p_prev, state.p, T_turb, cfg);
 
-        %% 11. Density (Peng-Robinson) ---------------------------------
+        %% 11. Density (Peng-Robinson)
         [state.rho, rho_comp_state] = updateDensity(state.p, state.Tgas, ...
                                                      rho_comp_state, cfg);
 
-        %% 12. Sensor readings (multiplicative + floor) ---------------
+        %% 12. Sensor readings
         nf = cfg.sensor_noise_floor;
         sensor_p = state.p + max(cfg.sensor_noise * abs(state.p), nf) .* ...
                    randn(params.nNodes, 1);
         sensor_q = state.q + max(cfg.sensor_noise * abs(state.q), nf) .* ...
                    randn(params.nEdges, 1);
 
-        %% 13. A5/A6: Sensor spoofing (before PLC) --------------------
+        %% 13. Sensor spoof (A5/A6)
         [sensor_p, sensor_q] = applySensorSpoof(aid, k, dt, schedule, ...
                                                  sensor_p, sensor_q, cfg);
 
-        %% 14. PLC polling (zone-based) -------------------------------
+        %% 14. PLC polling
         if aid == 7
-            plc_latency_eff = cfg.plc_latency + cfg.atk7_extra_latency;
-            plc = updatePLCWithLatency(plc, sensor_p, sensor_q, k, plc_latency_eff, cfg);
+            plc = updatePLCWithLatency(plc, sensor_p, sensor_q, k, ...
+                                       cfg.plc_latency + cfg.atk7_extra_latency, cfg);
         else
             plc = updatePLC(plc, sensor_p, sensor_q, k, cfg);
         end
 
-        %% 15. EKF correction -----------------------------------------
+        %% 15. EKF
         ekf = updateEKF(ekf, plc.reg_p, plc.reg_q, state.p, state.q);
 
-        %% 16. Control logic ------------------------------------------
-        if aid ~= 2   % bypass PID during compressor ratio spoofing
+        %% 16. Control logic
+        if aid ~= 2
             [comp1, comp2, prs1, prs2, valve_states, plc] = ...
                 updateControlLogic(comp1, comp2, prs1, prs2, valve_states, ...
                                    plc, ekf.xhatP, cfg, k, dt);
         else
-            % Advance latency buffers without PID
             plc = advanceLatencyBuffers(plc);
         end
 
-        %% 17. Log all state -----------------------------------------
-        logs = updateLogs(logs, state, ekf, plc, comp1, comp2, prs1, prs2, ...
-                          valve_states, params, k, sensor_p, sensor_q, ...
-                          src_p1_k, src_p2_k, demand_k, q_sto);
-        logs.logAttackId(k)   = aid;
-        logs.logAttackName(k) = schedule.label_name(k);
-        logs.logMitreId(k)    = schedule.label_mitre(k);
-
-        %% 18. Incident detection ------------------------------------
+        %% 17. Incident detection
         detectIncidents(cfg, params, state, ekf, comp1, comp2, plc, k, dt);
 
-        %% 19. Progress heartbeat ------------------------------------
+        %% 18. Log row + gateway — every log_every steps only ─────────────
+        if mod(k, log_every) == 0
+
+            %% Gateway: once per logged row (not every physics step)
+            if use_gw
+                gw_out.p             = sensor_p;
+                gw_out.q             = sensor_q;
+                gw_out.T             = state.Tgas;
+                gw_out.demand_scalar = demand_k;
+                sendToGateway(cfg, gw_out);
+                gw_state = receiveFromGateway(cfg, gw_state);
+                if gw_state.updated
+                    comp1.ratio     = max(comp1.ratio_min, min(comp1.ratio_max, gw_state.cs1_ratio));
+                    comp2.ratio     = max(comp2.ratio_min, min(comp2.ratio_max, gw_state.cs2_ratio));
+                    valve_states(1) = gw_state.valve_E8;
+                    valve_states(2) = gw_state.valve_E14;
+                    valve_states(3) = gw_state.valve_E15;
+                end
+            end
+
+            %% Write dataset row
+            log_k = log_k + 1;
+            if log_k <= size(logs.logP, 2)
+                logs = updateLogs(logs, state, ekf, plc, comp1, comp2, prs1, prs2, ...
+                                  valve_states, params, log_k, sensor_p, sensor_q, ...
+                                  src_p1_k, src_p2_k, demand_k, q_sto);
+                logs.logAttackId(log_k)   = aid;
+                logs.logAttackName(log_k) = schedule.label_name(k);
+                logs.logMitreId(log_k)    = schedule.label_mitre(k);
+            end
+        end
+
+        %% 19. Progress heartbeat (every 5 simulated minutes)
         if mod(k, progress_interval) == 0
             sim_min = k * dt / 60;
-            fprintf('  [%.1f/%.0f min]  P_S1=%.1f bar  P_D1=%.1f bar  Atk=%d  Inv=%.2f\n', ...
-                    sim_min, N*dt/60, state.p(1), state.p(15), aid, state.sto_inventory);
-            fprintf(exec_fid, '[INFO] t=%.1fmin  aid=%d\n', sim_min, aid);
+            wall_s  = toc(wall_t0);
+            fprintf('  [sim %5.1f / %3.0f min]  wall %6.1fs  P_S1=%.1f  P_D1=%.1f  Atk=%d  Rows=%d\n', ...
+                    sim_min, N*dt/60, wall_s, state.p(1), state.p(15), aid, log_k);
+            fprintf(exec_fid, '[INFO] t=%.1fmin  wall=%.1fs  aid=%d  rows=%d\n', ...
+                    sim_min, wall_s, aid, log_k);
         end
 
     end % main loop
 
+    wall_total = toc(wall_t0);
     fclose(exec_fid);
-    logEvent('INFO','runSimulation','Main simulation loop complete', N, dt);
+    logEvent('INFO','runSimulation', ...
+             sprintf('Done: %d steps  %d rows  %.1fs wall  %.0fx faster than real-time', ...
+                     N, log_k, wall_total, (N*dt)/wall_total), N, dt);
 end
 
-%% ===== LOCAL HELPERS =================================================
+%% ===== LOCAL HELPERS =====================================================
 
 function plc = updatePLC(plc, sensor_p, sensor_q, k, cfg)
     if mod(k, cfg.plc_period_z1) == 0
@@ -187,9 +228,9 @@ function plc = updatePLCWithLatency(plc, sensor_p, sensor_q, k, latency, cfg)
 end
 
 function plc = advanceLatencyBuffers(plc)
-    plc.compRatio1Buf  = [plc.compRatio1Buf(2:end),  plc.act_comp1_ratio];
-    plc.compRatio2Buf  = [plc.compRatio2Buf(2:end),  plc.act_comp2_ratio];
-    plc.valveCmdBuf    = [plc.valveCmdBuf(:,2:end),  plc.act_valve_cmds];
+    plc.compRatio1Buf   = [plc.compRatio1Buf(2:end),  plc.act_comp1_ratio];
+    plc.compRatio2Buf   = [plc.compRatio2Buf(2:end),  plc.act_comp2_ratio];
+    plc.valveCmdBuf     = [plc.valveCmdBuf(:,2:end),  plc.act_valve_cmds];
     plc.act_comp1_ratio = plc.compRatio1Buf(1);
     plc.act_comp2_ratio = plc.compRatio2Buf(1);
     plc.act_valve_cmds  = plc.valveCmdBuf(:,1);

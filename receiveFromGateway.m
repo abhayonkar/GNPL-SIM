@@ -1,70 +1,68 @@
-function plc = receiveFromGateway(u, plc_prev, cfg)
-% receiveFromGateway  Receive PLC actuator commands from Python gateway via UDP
+function gw_state = receiveFromGateway(cfg, gw_prev)
+% receiveFromGateway  Block-wait for actuator reply from Python gateway.
 %
-% Reads 16 float64 values (128 bytes) from gateway UDP port 6006.
-% Gateway sends raw INT values — this function divides by scale.
+%   gw_state = receiveFromGateway(cfg, gw_prev)
 %
-% Packet layout (16 x float64 = 128 bytes):
-%   [1]  cs1_ratio_cmd_raw   INT/1000 -> ratio  (e.g. 1250 -> 1.25)
-%   [2]  cs2_ratio_cmd_raw   INT/1000 -> ratio
-%   [3]  valve_E8_raw        INT/1000 -> 0=closed, 1=open
-%   [4]  valve_E14_raw       INT/1000 -> 0=closed, 1=open
-%   [5]  valve_E15_raw       INT/1000 -> 0=closed, 1=open
-%   [6]  prs1_setpoint_raw   INT/100  -> bar
-%   [7]  prs2_setpoint_raw   INT/100  -> bar
-%   [8]  cs1_power_raw       INT/10   -> kW
-%   [9]  cs2_power_raw       INT/10   -> kW
-%   [10] emergency_shutdown  0 or 1   -> bool
-%   [11] cs1_alarm           0 or 1
-%   [12] cs2_alarm           0 or 1
-%   [13] sto_inject_active   0 or 1
-%   [14] sto_withdraw_active 0 or 1
-%   [15] prs1_active         0 or 1
-%   [16] prs2_active         0 or 1
+%   Uses cfg.rx_sock (java.net.DatagramSocket, timeout already set).
+%   Blocks up to cfg.gateway_timeout_s (set via rx_sock.setSoTimeout).
+%   Returns gw_prev unchanged on timeout (offline fallback).
 %
-% Returns plc struct. On timeout returns plc_prev unchanged.
-%
-% Args:
-%   u        - udpport object
-%   plc_prev - previous plc struct (returned unchanged on timeout)
-%   cfg      - config struct
+%   Packet layout (16 × float64 = 128 bytes):
+%     [1-9]   actuator raw INTs  (MATLAB divides by scale)
+%     [10-16] coil bools (0.0 or 1.0)
 
     EXPECTED_BYTES = 16 * 8;   % 128 bytes
-
-    plc = plc_prev;   % default: keep last known values
+    gw_state = gw_prev;
+    gw_state.updated = false;
 
     try
-        if u.NumBytesAvailable >= EXPECTED_BYTES
-            bytes = read(u, EXPECTED_BYTES, 'uint8');
-            vals  = typecast(uint8(bytes), 'double');  % 16x1
+        % Pre-allocate receive buffer
+        buf    = zeros(1, EXPECTED_BYTES, 'int8');
+        jbuf   = javaArray('java.lang.Byte', EXPECTED_BYTES);   %#ok — not used directly
+        packet = java.net.DatagramPacket(buf, EXPECTED_BYTES);
 
-            % --- actuators (raw INT / scale) ---
-            plc.cs1_ratio   = vals(1)  / 1000.0;   % e.g. 1250 -> 1.25
-            plc.cs2_ratio   = vals(2)  / 1000.0;
-            plc.valve_E8    = vals(3)  / 1000.0;   % 1000 -> 1.0 (open)
-            plc.valve_E14   = vals(4)  / 1000.0;
-            plc.valve_E15   = vals(5)  / 1000.0;
-            plc.prs1_sp     = vals(6)  / 100.0;    % bar
-            plc.prs2_sp     = vals(7)  / 100.0;
-            plc.cs1_power   = vals(8)  / 10.0;     % kW
-            plc.cs2_power   = vals(9)  / 10.0;
+        cfg.rx_sock.receive(packet);   % blocks until data arrives or timeout
 
-            % --- status coils ---
-            plc.emergency_shutdown  = logical(vals(10));
-            plc.cs1_alarm           = logical(vals(11));
-            plc.cs2_alarm           = logical(vals(12));
-            plc.sto_inject          = logical(vals(13));
-            plc.sto_withdraw        = logical(vals(14));
-            plc.prs1_active         = logical(vals(15));
-            plc.prs2_active         = logical(vals(16));
+        % Extract received bytes
+        received = packet.getData();   % int8 Java array
+        nbytes   = packet.getLength();
 
-            plc.updated = true;
-            plc.last_rx = now();
-        else
-            plc.updated = false;   % no new data this cycle — use previous
+        if nbytes < EXPECTED_BYTES
+            return;   % short packet — keep previous
         end
+
+        % Convert Java int8 array to MATLAB uint8, then to doubles
+        raw_bytes = typecast(int8(received(1:EXPECTED_BYTES)), 'uint8');
+        vals      = typecast(raw_bytes, 'double');   % 16×1
+
+        % Actuators (raw INT → engineering units)
+        gw_state.cs1_ratio   = vals(1)  / 1000.0;
+        gw_state.cs2_ratio   = vals(2)  / 1000.0;
+        gw_state.valve_E8    = vals(3)  / 1000.0;
+        gw_state.valve_E14   = vals(4)  / 1000.0;
+        gw_state.valve_E15   = vals(5)  / 1000.0;
+        gw_state.prs1_sp     = vals(6)  / 100.0;
+        gw_state.prs2_sp     = vals(7)  / 100.0;
+        gw_state.cs1_power   = vals(8)  / 10.0;
+        gw_state.cs2_power   = vals(9)  / 10.0;
+
+        % Status coils
+        gw_state.emergency_shutdown  = logical(vals(10));
+        gw_state.cs1_alarm           = logical(vals(11));
+        gw_state.cs2_alarm           = logical(vals(12));
+        gw_state.sto_inject          = logical(vals(13));
+        gw_state.sto_withdraw        = logical(vals(14));
+        gw_state.prs1_active         = logical(vals(15));
+        gw_state.prs2_active         = logical(vals(16));
+
+        gw_state.updated = true;
+        gw_state.last_rx = now();
+
     catch e
-        warning('receiveFromGateway: %s', e.message);
-        plc.updated = false;
+        % java.net.SocketTimeoutException is expected on timeout — silent
+        if ~contains(e.message, 'timeout') && ~contains(e.message, 'Timeout')
+            warning('receiveFromGateway: %s', e.message);
+        end
+        gw_state.updated = false;
     end
 end

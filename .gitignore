@@ -55,11 +55,7 @@ Thumbs.db
 Thumbs.db
 Desktop.ini
 
-# Project specific
-data/
-*.csv
-*.log
-*.mat
+
 
 # Temporary files
 *.tmp
