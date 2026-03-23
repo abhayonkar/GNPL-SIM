@@ -1,1 +1,4 @@
-give me a scirpt that will log data in csv with all column values in csv with all data in gateway only for all 67 registers and 3 coils
+1. give me a scirpt that will log data in csv with all column values in csv with all data in gateway only for all 67 registers and 3 coils
+2. define the properties of the gas pipeline network and also it's topology, study about all the variations like if one source or sink is closed and these type of combinations 
+3. Try to find all the possible topological features that can prove it is realistic 
+4. define objectives for both simulator and physical setup also create a 3 month path 

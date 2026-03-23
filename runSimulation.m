@@ -1,46 +1,67 @@
 function [params, state, comp1, comp2, prs1, prs2, ekf, plc, logs] = runSimulation( ...
         cfg, params, state, comp1, comp2, prs1, prs2, ekf, plc, logs, ...
         N, src_p1, src_p2, demand, schedule)
-% runSimulation  Main simulation loop — runs at full CPU speed.
+% runSimulation  Phase 5 main loop — full speed, no pacing.
 %
-%  TIMING MODEL:
-%    Physics advances dt = 0.1 s per step regardless of wall time.
-%    No pause(), no sleep(), no real-time pacing of any kind.
-%    Logging fires every cfg.log_every steps (e.g. every 10 steps = 1 Hz
-%    dataset rows for a 10 Hz physics simulation).
-%    Gateway exchange fires at the same cadence as logging (once per row).
-%    A 100-min simulation completes in ~seconds of wall time.
+%  PHASE 5 ADDITIONS vs previous version:
+%
+%  1. ADC QUANTISATION (R2)
+%     quantiseADC() applied to sensor_p and sensor_q after noise + spoof.
+%     Platform selected by cfg.adc_platform ('codesys' or 's7_1200').
+%     Effect: staircase distributions replace continuous sensor readings.
+%
+%  2. STEALTHY FDI A9 (R1)
+%     computeFDIVector() called inside applySensorSpoof for aid==9.
+%     Constructs a = H*c with H=I, guaranteeing zero EKF residual.
+%     ekf struct passed into applySensorSpoof so FDI vector uses
+%     current state estimate as bias anchor.
+%
+%  3. REPLAY ATTACK A10 (R4 / #5)
+%     applyReplayAttack() manages a rolling ring buffer of T_buf_steps.
+%     Pre-attack: every step writes live sensor readings into the buffer.
+%     Attack active: all sensor channels replaced with buffered content.
+%     k_attack counter tracks steps elapsed since attack onset.
+%
+%  4. SCAN-CYCLE JITTER (R3)
+%     addScanJitter() generates per-platform timestamp offsets.
+%     Stored in logs.logTimestamp_ms (millisecond-resolution timestamps).
+%     Does not affect physics — purely a dataset realism feature.
 %
 %  Per-step sequence:
-%    1.  Attack injection (A1-A4)
+%    1.  Attack injection (A1–A4, A7, A8 via applyAttackEffects)
 %    2.  Roughness drift AR(1)
 %    3.  Flow turbulence AR(1)
-%    4.  updateFlow    (Darcy-Weisbach + elevation + line pack)
-%    5.  updateStorage
-%    6.  updatePressure
-%    7.  updateCompressor CS1 + CS2
-%    8.  updatePRS PRS1 + PRS2
-%    9.  updateTemperature
-%   10.  updateDensity (Peng-Robinson)
-%   11.  Sensor reading
-%   12.  applySensorSpoof (A5/A6)
-%   13.  updatePLC
-%   14.  updateEKF
-%   15.  updateControlLogic
-%   16.  detectIncidents
-%   17.  [every log_every steps] gateway exchange + write dataset row
-%   18.  Progress heartbeat (every 5 simulated minutes)
+%    4.  updateFlow
+%    5.  A8 pipeline leak
+%    6.  updateStorage
+%    7.  updatePressure
+%    8.  updateCompressor CS1 + CS2
+%    9.  updatePRS
+%   10.  updateTemperature
+%   11.  updateDensity (Peng-Robinson)
+%   12.  Sensor readings (multiplicative noise)
+%   13.  A10 replay buffer write / channel substitution  [PHASE 5]
+%   14.  applySensorSpoof (A5, A6, A9-FDI)              [PHASE 5: A9]
+%   15.  quantiseADC — pressure + flow                  [PHASE 5]
+%   16.  updatePLC
+%   17.  updateEKF
+%   18.  updateControlLogic
+%   19.  detectIncidents
+%   20.  [every log_every] gateway + log row + jitter   [PHASE 5: jitter]
 
     dt        = cfg.dt;
     log_every = max(1, cfg.log_every);
+    use_gw    = isfield(cfg, 'use_gateway') && cfg.use_gateway;
 
     if ~exist('automated_dataset', 'dir'), mkdir('automated_dataset'); end
     exec_fid = fopen(fullfile('automated_dataset','execution_details.log'), 'w');
     fprintf(exec_fid, '[INFO] Started: %s  N=%d  log_every=%d  N_log=%d\n', ...
             datestr(now), N, log_every, floor(N/log_every));
+    fprintf(exec_fid, '[INFO] ADC: %s (%s)  Jitter: %s (%s)\n', ...
+            mat2str(cfg.adc_enable), cfg.adc_platform, ...
+            mat2str(cfg.jitter_enable), cfg.jitter_platform);
 
-    progress_interval = max(1, round(5*60 / dt));   % heartbeat every 5 sim-min
-    use_gw   = isfield(cfg, 'use_gateway') && cfg.use_gateway;
+    progress_interval = max(1, round(5*60 / dt));
 
     %% Persistent noise states
     turb_state     = zeros(params.nEdges, 1);
@@ -49,18 +70,26 @@ function [params, state, comp1, comp2, prs1, prs2, ekf, plc, logs] = runSimulati
     rho_comp_state = 0;
     valve_states   = ones(numel(params.valveEdges), 1);
 
-    gw_state = initGatewayState();
-    log_k    = 0;
-    wall_t0  = tic;
+    %% Phase 5 state objects
+    replay_buf  = initReplayBuffer(params.nNodes, params.nEdges, cfg);
+    jitter_buf  = initJitterBuffer();
+    gw_state    = initGatewayState();
 
-    logEvent('INFO', 'runSimulation', ...
-             sprintf('Loop start  N=%d  log_every=%d  N_log=%d', ...
-                     N, log_every, floor(N/log_every)), 0, dt);
+    log_k = 0;
+    wall_t0 = tic;
+
+    %% Track replay attack onset per aid==10 window
+    replay_k_attack = 0;   % steps elapsed since A10 onset
+    prev_aid        = 0;
+
+    logEvent('INFO','runSimulation', ...
+             sprintf('Phase 5 loop: N=%d  log_every=%d  ADC=%s  Jitter=%s', ...
+                     N, log_every, cfg.adc_platform, cfg.jitter_platform), 0, dt);
 
     %% ================================================================
     for k = 1:N
 
-        %% 1. Attack injection
+        %% 1. Attack injection (A1–A4, A7, A8)
         aid = double(schedule.label_id(k));
         [src_p1_k, src_p2_k, comp1, comp2, plc, valve_states, demand_k] = ...
             applyAttackEffects(aid, k, dt, schedule, src_p1(k), src_p2(k), ...
@@ -115,22 +144,50 @@ function [params, state, comp1, comp2, prs1, prs2, ekf, plc, logs] = runSimulati
         [state.Tgas, T_turb] = updateTemperature(params, state.Tgas, state.q, ...
                                                   p_prev, state.p, T_turb, cfg);
 
-        %% 11. Density (Peng-Robinson)
+        %% 11. Density (Peng-Robinson EOS)
         [state.rho, rho_comp_state] = updateDensity(state.p, state.Tgas, ...
                                                      rho_comp_state, cfg);
 
-        %% 12. Sensor readings
+        %% 12. Raw sensor readings (multiplicative noise + floor)
         nf = cfg.sensor_noise_floor;
         sensor_p = state.p + max(cfg.sensor_noise * abs(state.p), nf) .* ...
                    randn(params.nNodes, 1);
         sensor_q = state.q + max(cfg.sensor_noise * abs(state.q), nf) .* ...
                    randn(params.nEdges, 1);
 
-        %% 13. Sensor spoof (A5/A6)
-        [sensor_p, sensor_q] = applySensorSpoof(aid, k, dt, schedule, ...
-                                                 sensor_p, sensor_q, cfg);
+        %% 13. A10 REPLAY ATTACK — buffer write / channel substitution ──────
+        %  Track k_attack: steps elapsed since the current A10 window started.
+        %  Reset to 0 whenever we're not in A10.
+        if aid == 10
+            if prev_aid ~= 10
+                replay_k_attack = 0;   % just entered attack window
+            else
+                replay_k_attack = replay_k_attack + 1;
+            end
+            [sensor_p, sensor_q, replay_buf] = applyReplayAttack( ...
+                sensor_p, sensor_q, replay_buf, replay_k_attack, cfg);
+        else
+            replay_k_attack = 0;
+            % Pre-attack: always keep writing to buffer so it's ready
+            [~, ~, replay_buf] = applyReplayAttack( ...
+                sensor_p, sensor_q, replay_buf, -1, cfg);
+        end
+        prev_aid = aid;
 
-        %% 14. PLC polling
+        %% 14. SENSOR SPOOFING: A5, A6, A9 (FDI) ────────────────────────────
+        %  A9 uses ekf.xhatP as the bias anchor — pass ekf struct.
+        [sensor_p, sensor_q] = applySensorSpoof( ...
+            aid, k, dt, schedule, sensor_p, sensor_q, cfg, ekf, replay_buf);
+
+        %% 15. ADC QUANTISATION ──────────────────────────────────────────────
+        %  Applied after spoofing, before PLC register update.
+        %  This matches the real signal chain: transmitter → ADC → register.
+        if cfg.adc_enable
+            sensor_p = quantiseADC(sensor_p, cfg.adc_p_full_scale, cfg);
+            sensor_q = quantiseADC(abs(sensor_q), cfg.adc_q_full_scale, cfg) .* sign(sensor_q);
+        end
+
+        %% 16. PLC polling
         if aid == 7
             plc = updatePLCWithLatency(plc, sensor_p, sensor_q, k, ...
                                        cfg.plc_latency + cfg.atk7_extra_latency, cfg);
@@ -138,10 +195,10 @@ function [params, state, comp1, comp2, prs1, prs2, ekf, plc, logs] = runSimulati
             plc = updatePLC(plc, sensor_p, sensor_q, k, cfg);
         end
 
-        %% 15. EKF
+        %% 17. EKF
         ekf = updateEKF(ekf, plc.reg_p, plc.reg_q, state.p, state.q);
 
-        %% 16. Control logic
+        %% 18. Control logic
         if aid ~= 2
             [comp1, comp2, prs1, prs2, valve_states, plc] = ...
                 updateControlLogic(comp1, comp2, prs1, prs2, valve_states, ...
@@ -150,13 +207,13 @@ function [params, state, comp1, comp2, prs1, prs2, ekf, plc, logs] = runSimulati
             plc = advanceLatencyBuffers(plc);
         end
 
-        %% 17. Incident detection
+        %% 19. Incident detection
         detectIncidents(cfg, params, state, ekf, comp1, comp2, plc, k, dt);
 
-        %% 18. Log row + gateway — every log_every steps only ─────────────
+        %% 20. Log row + gateway — every log_every steps ───────────────────
         if mod(k, log_every) == 0
 
-            %% Gateway: once per logged row (not every physics step)
+            %% Gateway exchange (1 Hz when log_every=10, dt=0.1)
             if use_gw
                 gw_out.p             = sensor_p;
                 gw_out.q             = sensor_q;
@@ -173,6 +230,10 @@ function [params, state, comp1, comp2, prs1, prs2, ekf, plc, logs] = runSimulati
                 end
             end
 
+            %% Scan-cycle jitter timestamp (R3)
+            log_dt_s = cfg.dt * log_every;
+            [jitter_ms, jitter_buf] = addScanJitter(log_dt_s, cfg, jitter_buf);
+
             %% Write dataset row
             log_k = log_k + 1;
             if log_k <= size(logs.logP, 2)
@@ -182,10 +243,15 @@ function [params, state, comp1, comp2, prs1, prs2, ekf, plc, logs] = runSimulati
                 logs.logAttackId(log_k)   = aid;
                 logs.logAttackName(log_k) = schedule.label_name(k);
                 logs.logMitreId(log_k)    = schedule.label_mitre(k);
+
+                %% Store jitter offset (ms) — added to nominal timestamp in export
+                if isfield(logs, 'logJitter_ms')
+                    logs.logJitter_ms(log_k) = jitter_ms;
+                end
             end
         end
 
-        %% 19. Progress heartbeat (every 5 simulated minutes)
+        %% 21. Progress heartbeat (every 5 simulated minutes)
         if mod(k, progress_interval) == 0
             sim_min = k * dt / 60;
             wall_s  = toc(wall_t0);
@@ -200,7 +266,7 @@ function [params, state, comp1, comp2, prs1, prs2, ekf, plc, logs] = runSimulati
     wall_total = toc(wall_t0);
     fclose(exec_fid);
     logEvent('INFO','runSimulation', ...
-             sprintf('Done: %d steps  %d rows  %.1fs wall  %.0fx faster than real-time', ...
+             sprintf('Done: %d steps  %d rows  %.1fs wall  %.0fx real-time', ...
                      N, log_k, wall_total, (N*dt)/wall_total), N, dt);
 end
 
@@ -220,9 +286,9 @@ function plc = updatePLCWithLatency(plc, sensor_p, sensor_q, k, latency, cfg)
     end
     pad = max(0, latency - length(plc.compRatio1Buf));
     if pad > 0
-        plc.compRatio1Buf = [plc.compRatio1Buf, repmat(plc.act_comp1_ratio, 1, pad)];
-        plc.compRatio2Buf = [plc.compRatio2Buf, repmat(plc.act_comp2_ratio, 1, pad)];
-        plc.valveCmdBuf   = [plc.valveCmdBuf,   repmat(plc.act_valve_cmds, 1, pad)];
+        plc.compRatio1Buf = [plc.compRatio1Buf, repmat(plc.act_comp1_ratio,1,pad)];
+        plc.compRatio2Buf = [plc.compRatio2Buf, repmat(plc.act_comp2_ratio,1,pad)];
+        plc.valveCmdBuf   = [plc.valveCmdBuf,   repmat(plc.act_valve_cmds,1,pad)];
     end
     plc = advanceLatencyBuffers(plc);
 end
