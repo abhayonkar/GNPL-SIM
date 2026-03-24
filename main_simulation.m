@@ -18,10 +18,8 @@ function main_simulation(duration_min, use_gateway)
     fprintf('  Gas Pipeline CPS Simulator\n');
     fprintf('  Duration   : %d min\n', duration_min);
     fprintf('  Gateway    : %s\n', string(use_gateway));
-
     addpath('config','network','equipment','scada','control', ...
-            'attacks','logging','export','middleware','profiling');
-
+            'attacks','logging','export','middleware','profiling','processing');
     %% ── Configuration ────────────────────────────────────────────────────
     fprintf('[init] Loading configuration...\n');
     cfg       = simConfig();
