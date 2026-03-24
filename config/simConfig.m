@@ -1,16 +1,15 @@
 function cfg = simConfig()
 % simConfig  Single source of truth for all simulation parameters.
 %
-%  NEW IN PHASE 5:
-%    Section 16 — ADC quantisation (R2): simulates real PLC ADC resolution
-%    Section 17 — Scan-cycle jitter  (R3): per-platform timing artefacts
-%    Section 18 — A9 FDI parameters  (R1): stealthy triangle attack
-%    Section 19 — A10 Replay params  (R4): rolling buffer replay
+%  Phase 6 additions:
+%    Section 20 — CUSUM detector parameters
+%    Section 21 — Historian / deadband compression
+%    Section 22 — Fault injection (packet loss, stuck sensor)
 
     %% 1. Time
     cfg.dt        = 0.1;
     cfg.T         = 100 * 60;
-    cfg.log_every = 10;          % 1 Hz dataset rows
+    cfg.log_every = 10;
 
     %% 2. Network topology
     cfg.nodeNames = ["S1","J1","CS1","J2","J3","J4","CS2","J5", ...
@@ -62,11 +61,11 @@ function cfg = simConfig()
     cfg.comp_pulsation_amp=0.008; cfg.comp_pulsation_freq=2.0;
     cfg.comp_surge_noise=0.005;   cfg.comp_surge_corr=0.92;
 
-    %% 6. Pressure Regulating Stations
+    %% 6. PRS
     cfg.prs1_node=10; cfg.prs1_setpoint=30.0; cfg.prs1_deadband=0.5; cfg.prs1_tau=5.0;
     cfg.prs2_node=13; cfg.prs2_setpoint=25.0; cfg.prs2_deadband=0.5; cfg.prs2_tau=5.0;
 
-    %% 7. Underground Storage
+    %% 7. Storage
     cfg.sto_node=12; cfg.sto_capacity=1e9; cfg.sto_inventory_init=0.60;
     cfg.sto_p_inject=52.0; cfg.sto_p_withdraw=46.0;
     cfg.sto_max_flow=5.0;  cfg.sto_k_flow=0.5;
@@ -74,10 +73,21 @@ function cfg = simConfig()
     %% 8. EKF
     cfg.ekf_P0=0.1; cfg.ekf_Qn=1e-4; cfg.ekf_Rk=0.1;
 
-    %% 9. PLC / SCADA
-    cfg.plc_period_z1=10; cfg.plc_period_z2=15; cfg.plc_period_z3=20;
-    cfg.plc_latency=3; cfg.valve_open_default=1;
-    cfg.plc_period=cfg.plc_period_z1;
+    %% 9. PLC / SCADA — zone periods in physics steps
+    cfg.plc_period_z1 = 10;   % zone 1: every 10 steps = 1.0 s  (critical nodes)
+    cfg.plc_period_z2 = 15;   % zone 2: every 15 steps = 1.5 s  (mid-priority)
+    cfg.plc_period_z3 = 20;   % zone 3: every 20 steps = 2.0 s  (low-priority)
+    cfg.plc_latency   = 3;
+    cfg.valve_open_default = 1;
+    cfg.plc_period    = cfg.plc_period_z1;   % legacy alias
+
+    %  Node zone assignments (1-based node indices → zone 1/2/3)
+    %  Zone 1: source + compressor + delivery nodes (high criticality)
+    %  Zone 2: junction + PRS nodes (medium criticality)
+    %  Zone 3: storage + secondary junction nodes (low criticality)
+    cfg.plc_zone1_nodes = [1,3,7,14,15,16,17,18,19,20];   % S1,CS1,CS2,S2,D1-D6
+    cfg.plc_zone2_nodes = [2,4,5,6,8,9,10,13];            % junctions + PRS nodes
+    cfg.plc_zone3_nodes = [11,12];                          % J7, STO
 
     %% 10. Control (PID)
     cfg.pid1_Kp=0.4; cfg.pid1_Ki=0.008; cfg.pid1_Kd=0.08; cfg.pid1_setpoint=30.0;
@@ -105,10 +115,10 @@ function cfg = simConfig()
     cfg.dem_noise_std=0.02; cfg.dem_min=0.10; cfg.dem_max=1.20;
 
     %% 13. Attack scheduling
-    cfg.n_attacks     = 4;
-    cfg.atk_warmup_s  = 10*60;
-    cfg.atk_recovery_s = 5*60;
-    cfg.atk_min_gap_s  = 5*60;
+    cfg.n_attacks      = 4;
+    cfg.atk_warmup_s   = 10*60;
+    cfg.atk_recovery_s =  5*60;
+    cfg.atk_min_gap_s  =  5*60;
     cfg.atk_dur_min_s  = 180;
     cfg.atk_dur_max_s  = 480;
 
@@ -126,82 +136,85 @@ function cfg = simConfig()
     cfg.pr_Tc=190.6; cfg.pr_Pc=46.1; cfg.pr_omega=0.011;
     cfg.pr_M=0.01604; cfg.pr_R=8.314;
 
-    %% ── PHASE 5 ADDITIONS ────────────────────────────────────────────────
+    %% 16. ADC Quantisation (Phase 5 / R2)
+    cfg.adc_enable          = true;
+    cfg.adc_platform        = 'codesys';   % 'codesys' or 's7_1200'
+    cfg.adc_p_full_scale    = 70.0;
+    cfg.adc_q_full_scale    = 500.0;
+    cfg.adc_T_full_scale    = 400.0;
+    cfg.adc_counts_codesys  = 32767;
+    cfg.adc_counts_s7       = 27648;
 
-    %% 16. ADC Quantisation (R2) ─────────────────────────────────────────
-    %  Simulates real PLC analog-to-digital converter resolution.
-    %  Applied to sensor_p and sensor_q AFTER noise, AFTER spoofing.
-    %
-    %  Platform profiles:
-    %    'codesys'  — INT16 range [-32768, 32767]; raw counts = 32767
-    %                 CODESYS uses full signed INT16 for analog I/O
-    %    's7_1200'  — Siemens SM1231 maps 0–10V → 0–27648 (not 0–65535)
-    %                 This creates a characteristic stepped distribution
-    %                 that differs from CODESYS — critical for portability
-    %
-    %  Full-scale values define the physical range each ADC channel spans.
-    %  A value outside [0, full_scale] clips to the nearest rail.
-
-    cfg.adc_enable   = true;          % set false to disable quantisation
-    cfg.adc_platform = 'codesys';     % 'codesys' or 's7_1200'
-
-    % Physical full-scale ranges per variable type
-    cfg.adc_p_full_scale = 70.0;      % bar   — transmission pressure max
-    cfg.adc_q_full_scale = 500.0;     % kg/s  — max expected flow magnitude
-    cfg.adc_T_full_scale = 400.0;     % K     — temperature max
-
-    % Platform-specific ADC count limits
-    cfg.adc_counts_codesys = 32767;   % INT16 max (CODESYS raw)
-    cfg.adc_counts_s7      = 27648;   % Siemens SM1231 analog input max
-                                      % S7-1200 maps 0–10V → 0–27648
-
-    %% 17. Scan-cycle jitter (R3) ────────────────────────────────────────
-    %  Simulates per-platform timing artefacts in the polling interval.
-    %  CODESYS soft-PLC on Windows: broad jitter (OS scheduling)
-    %  S7-1200 hardware:            tight jitter (real-time kernel)
-    %
-    %  Jitter is added to inter-arrival timestamps in the dataset only
-    %  (does not affect physics; purely a dataset realism feature).
-
+    %% 17. Scan-cycle jitter (Phase 5 / R3)
     cfg.jitter_enable          = true;
-    cfg.jitter_platform        = 'codesys';   % 'codesys' or 's7_1200'
-    cfg.jitter_codesys_mean_ms = 0.0;         % zero mean (symmetric)
-    cfg.jitter_codesys_std_ms  = 20.0;        % ±20 ms typical Windows soft-PLC
-    cfg.jitter_codesys_max_ms  = 150.0;       % occasional OS preemption spike
+    cfg.jitter_platform        = 'codesys';
+    cfg.jitter_codesys_mean_ms = 0.0;
+    cfg.jitter_codesys_std_ms  = 20.0;
+    cfg.jitter_codesys_max_ms  = 150.0;
     cfg.jitter_s7_mean_ms      = 0.0;
-    cfg.jitter_s7_std_ms       = 1.5;         % ±1.5 ms S7-1200 hardware
-    cfg.jitter_s7_max_ms       = 10.0;        % rare watchdog reschedule
+    cfg.jitter_s7_std_ms       = 1.5;
+    cfg.jitter_s7_max_ms       = 10.0;
 
-    %% 18. A9 — Stealthy FDI (Liu-Ning-Reiter construction) (R1) ─────────
-    %  Triangle attack on 3 topologically adjacent nodes.
-    %  Attack vector a = H*c where H = I (identity observation model).
-    %  Result: EKF innovation residual is IDENTICAL with and without attack.
-    %  Detection requires physics cross-validation or spatial redundancy.
+    %% 18. A9 Stealthy FDI (Phase 5 / R1)
+    cfg.atk9_target_nodes = [4, 5, 8];
+    cfg.atk9_bias_scale   = 0.05;
+    cfg.atk9_ramp_s       = 30;
+
+    %% 19. A10 Replay (Phase 5)
+    cfg.atk10_buffer_s    = 60;
+    cfg.atk10_inject_mode = 'loop';
+
+    %% ── PHASE 6 ADDITIONS ────────────────────────────────────────────────
+
+    %% 20. CUSUM Detector (Phase 6 / R4)
+    %  Cumulative-sum sequential change-point detector on EKF innovations.
+    %  Runs in parallel with EKF threshold alarm — provides a paired
+    %  statistical test for the thesis results section.
     %
-    %  target_nodes: indices into the 20-node pressure vector
-    %    Node 4 = J2 (main trunk junction)
-    %    Node 5 = J3 (storage branch junction)
-    %    Node 8 = J5 (compressor CS2 outlet)
-    %  bias_scale: fraction of estimated nodal pressure injected as bias
-    %  ramp_s: linear ramp duration — avoids rate-of-change detection
+    %  slack:     allowance subtracted each step (controls sensitivity vs
+    %             false-alarm rate). Typical: 0.5–1.5 × noise std.
+    %  threshold: CUSUM statistic alarm level. Larger = fewer false alarms.
+    %             Set by ARL (average run length) analysis offline.
+    %  reset_on_alarm: if true, CUSUM resets to 0 after each alarm
+    %                  (one-sided CUSUM with reset = CUSUM Page test)
 
-    cfg.atk9_target_nodes = [4, 5, 8];   % J2, J3, J5 — triangle subgraph
-    cfg.atk9_bias_scale   = 0.05;        % 5% of nominal pressure per node
-    cfg.atk9_ramp_s       = 30;          % ramp bias over 30 s
+    cfg.cusum_enable      = true;
+    cfg.cusum_slack       = 1.0;    % in normalised innovation units
+    cfg.cusum_threshold   = 10.0;   % alarm when S(k) > threshold
+    cfg.cusum_reset_on_alarm = true;
 
-    %% 19. A10 — Replay Attack (Mo & Sinopoli formulation) ────────────────
-    %  Rolling buffer records T_buf seconds of normal sensor readings.
-    %  During attack: all correlated channels replaced with buffer content.
-    %  ALL sensor channels replaced simultaneously — partial replacement
-    %  is detectable via cross-channel inconsistency.
+    %% 21. Historian / Deadband Compression (Phase 6)
+    %  Real SCADA historians record a new value only when the measurement
+    %  changes by more than a deadband threshold since last stored value.
+    %  This produces an irregular-timestep secondary dataset.
     %
-    %  Frozen-noise-realisation signature: the same noise sequence repeats
-    %  with period T_buf. Detectable via autocorrelation analysis.
-    %
-    %  buffer_s:    recording window (seconds of physics data to buffer)
-    %  inject_mode: 'loop'   — replay buffer cyclically for attack duration
-    %               'single' — replay buffer once then hold last value
+    %  Output file: automated_dataset/historian_*.csv
+    %  Format: [Timestamp_s, NodeName, Value, Unit, ATTACK_ID]
+    %          (one row per change event, not per timestep)
 
-    cfg.atk10_buffer_s   = 60;         % 60 s buffer (600 steps at 10 Hz)
-    cfg.atk10_inject_mode = 'loop';    % cyclically replay the buffer
+    cfg.historian_enable         = true;
+    cfg.historian_deadband_p     = 0.10;    % bar   — pressure deadband
+    cfg.historian_deadband_q     = 0.50;    % kg/s  — flow deadband
+    cfg.historian_deadband_T     = 0.20;    % K     — temperature deadband
+    cfg.historian_max_interval_s = 60.0;    % force write at least every 60s
+
+    %% 22. Fault Injection — Packet Loss + Stuck Sensor (Phase 6)
+    %  Simulates communication faults independent of cyberattacks.
+    %  Fault events are labelled separately from attack labels (FAULT_ID).
+    %
+    %  PACKET LOSS: sensor reading is dropped; PLC retains last-known value.
+    %    loss_prob: per-step Bernoulli probability of a packet drop
+    %    max_consec: maximum consecutive steps before comms declared failed
+    %
+    %  STUCK SENSOR: sensor freezes at its last valid reading.
+    %    stuck_prob:  probability per step of a sensor getting stuck
+    %    stuck_dur_s: typical stuck duration (exponential distribution mean)
+    %    stuck_nodes: subset of nodes that can get stuck (high-wear sensors)
+
+    cfg.fault_enable         = true;
+    cfg.fault_loss_prob      = 0.002;    % 0.2% per step ≈ 1 drop per 8 min
+    cfg.fault_max_consec     = 5;        % 5 consecutive drops = comm fault
+    cfg.fault_stuck_prob     = 0.0005;   % 0.05% per step ≈ 1 stuck per 33 min
+    cfg.fault_stuck_dur_s    = 30;       % mean stuck duration = 30 s
+    cfg.fault_stuck_nodes    = [1,3,7,15,17];   % S1, CS1, CS2, D1, D3
 end
