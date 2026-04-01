@@ -55,6 +55,10 @@ Thumbs.db
 Thumbs.db
 Desktop.ini
 
+# Node modules
+node_modules/
+GNPL-arc/node_modules/
+
 
 
 # Temporary files
