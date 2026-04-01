@@ -59,7 +59,7 @@ function [sensor_p_out, sensor_q_out, fault, fault_label] = applyFaultInjection(
         if ~fault.stuck_active(n)
             % Bernoulli trial: does this sensor get stuck this step?
             if rand() < cfg.fault_stuck_prob
-                dur_steps = round(exprnd(cfg.fault_stuck_dur_s / dt));
+                dur_steps = round(-cfg.fault_stuck_dur_s / dt * log(rand()));
                 dur_steps = max(1, dur_steps);
                 fault.stuck_active(n) = true;
                 fault.stuck_rem(n)    = dur_steps;

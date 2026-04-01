@@ -40,6 +40,7 @@ function test_preservation()
 
     addpath(fullfile(pwd, 'attacks'));
     addpath(fullfile(pwd, 'config'));
+    addpath(fullfile(pwd, 'scada'));
 
     fprintf('\n');
     fprintf('=========================================================\n');
@@ -48,9 +49,12 @@ function test_preservation()
     fprintf('=========================================================\n\n');
 
     results = struct();
-    results.testA = run_preservation_A();
-    results.testB = run_preservation_B();
-    results.testC = run_preservation_C();
+    results.testA          = run_preservation_A();
+    results.testB          = run_preservation_B();
+    results.testC          = run_preservation_C();
+    results.ekf_K_path     = run_ekf_preservation_K_path();
+    results.ekf_legacy     = run_ekf_preservation_legacy_call();
+    results.ekf_fields     = run_ekf_preservation_output_fields();
 
     fprintf('\n=========================================================\n');
     fprintf('  SUMMARY\n');
@@ -66,7 +70,7 @@ function test_preservation()
     end
     fprintf('\n');
     if all_passed
-        fprintf('  Result: All 3 preservation tests PASS on unfixed code.\n');
+        fprintf('  Result: All %d preservation tests PASS.\n', numel(fields));
     else
         fprintf('  Result: One or more preservation tests FAILED.\n');
         fprintf('          Non-bug-condition paths may be broken.\n');
@@ -448,4 +452,260 @@ function path = write_csv_high_pressure(n_rows)
         fprintf(fid, '%.1f,%.4f,%.4f,0\n', double(k-1), s1, 5.5);
     end
     fclose(fid);
+end
+
+% =========================================================================
+%  EKF Preservation Tests — ekf-pipe-l-vec-bugfix spec
+% =========================================================================
+
+% -------------------------------------------------------------------------
+%  EKF Preservation: params.K path unchanged (Property 2)
+%  Validates: Requirements 3.1, 3.2, 3.3
+%
+%  Property: FOR ALL params WHERE isfield(params,'K')
+%              ekf_out = updateEKF(ekf, p, q, tp, tq, params, cfg)
+%              ASSERT no error thrown
+%              ASSERT size(ekf_out.xhat) == [40 1]
+%              ASSERT all(isfinite(ekf_out.xhat))
+% -------------------------------------------------------------------------
+function r = run_ekf_preservation_K_path()
+    fprintf('--- EKF Preservation: params.K path unchanged (Property 2) ---\n');
+
+    nTrials = 20;
+    pass_count = 0;
+    fail_count = 0;
+    counterexample = '';
+
+    for trial = 1:nTrials
+        try
+            % Random params.K (positive values)
+            params.K = 0.01 + rand(20,1) * 0.1;
+
+            % Random operating-point pressures and flows
+            xhat = [5 + rand(20,1)*3; rand(20,1)*0.2];
+
+            % Pipe network geometry
+            params.B = eye(20) - diag(ones(19,1), -1);
+            params.L = ones(20,1) * 1000;
+            params.D = ones(20,1) * 0.3;
+
+            % EKF struct
+            ekf.xhat = xhat;
+            ekf.P    = eye(40) * 0.1;
+            ekf.P0   = 1;
+            ekf.Rk   = 0.01;
+            ekf.Qn   = 0.001;
+
+            % cfg struct
+            cfg.dt     = 0.1;
+            cfg.c      = 340;
+            cfg.node_V = 100;
+
+            % Measurements (use xhat as "true" values for simplicity)
+            meas_p = xhat(1:20);
+            meas_q = xhat(21:40);
+
+            ekf_out = updateEKF(ekf, meas_p, meas_q, meas_p, meas_q, params, cfg);
+
+            xhat_ok = (numel(ekf_out.xhat) == 40) && all(isfinite(ekf_out.xhat));
+
+            if xhat_ok
+                pass_count = pass_count + 1;
+            else
+                fail_count = fail_count + 1;
+                if isempty(counterexample)
+                    counterexample = sprintf('Trial %d: xhat size=%d, finite=%d', ...
+                        trial, numel(ekf_out.xhat), all(isfinite(ekf_out.xhat)));
+                end
+            end
+
+        catch e
+            fail_count = fail_count + 1;
+            if isempty(counterexample)
+                counterexample = sprintf('Trial %d: error — %s', trial, e.message);
+            end
+        end
+    end
+
+    fprintf('    Ran %d trials: %d passed, %d failed\n', nTrials, pass_count, fail_count);
+
+    if fail_count == 0
+        fprintf('  PASS\n');
+        r.status = 'PASS';
+        r.counterexample = '';
+    else
+        fprintf('  FAIL\n');
+        fprintf('  Counterexample: %s\n', counterexample);
+        r.status = 'FAIL';
+        r.counterexample = counterexample;
+    end
+    fprintf('\n');
+end
+
+% -------------------------------------------------------------------------
+%  EKF Preservation: legacy 5-arg call (F=eye fallback)
+%  Validates: Requirements 3.1, 3.2
+%
+%  Property: updateEKF(ekf, p, q, tp, tq) with 5 args
+%              ASSERT no error thrown
+%              ASSERT numel(ekf_out.xhat) == 40
+%              ASSERT all(isfinite(ekf_out.xhat))
+%              ASSERT size(ekf_out.P) == [40 40]
+% -------------------------------------------------------------------------
+function r = run_ekf_preservation_legacy_call()
+    fprintf('--- EKF Preservation: legacy 5-arg call (F=eye fallback) ---\n');
+
+    try
+        % Minimal EKF struct
+        ekf.xhat = zeros(40, 1);
+        ekf.P    = eye(40) * 0.1;
+        ekf.P0   = 1;
+        ekf.Rk   = 0.01;
+        ekf.Qn   = 0.001;
+
+        % 5-arg call — no params, no cfg
+        ekf_out = updateEKF(ekf, ones(20,1)*5, ones(20,1)*0.1, ones(20,1)*5, ones(20,1)*0.1);
+
+        xhat_size_ok   = (numel(ekf_out.xhat) == 40);
+        xhat_finite_ok = all(isfinite(ekf_out.xhat));
+        P_size_ok      = isequal(size(ekf_out.P), [40 40]);
+
+        if xhat_size_ok && xhat_finite_ok && P_size_ok
+            fprintf('    xhat: 40 elements, all finite. P: 40×40. PASS\n');
+            fprintf('  PASS\n');
+            r.status = 'PASS';
+            r.counterexample = '';
+        else
+            ce = sprintf('xhat_size=%d, xhat_finite=%d, P_size=[%d %d]', ...
+                numel(ekf_out.xhat), all(isfinite(ekf_out.xhat)), size(ekf_out.P,1), size(ekf_out.P,2));
+            fprintf('  FAIL\n');
+            fprintf('  Counterexample: %s\n', ce);
+            r.status = 'FAIL';
+            r.counterexample = ce;
+        end
+
+    catch e
+        ce = sprintf('error — %s', e.message);
+        fprintf('  FAIL\n');
+        fprintf('  Counterexample: %s\n', ce);
+        r.status = 'FAIL';
+        r.counterexample = ce;
+    end
+    fprintf('\n');
+end
+
+% -------------------------------------------------------------------------
+%  EKF Preservation: all output fields present and finite
+%  Validates: Requirements 3.3
+%
+%  Property: Both paths (fallback no-K and primary K-present) produce all
+%  9 output fields: xhat, xhatP, xhatQ, residual, residualP, residualQ,
+%  S, chi2_stat, chi2_alarm — all present and finite.
+% -------------------------------------------------------------------------
+function r = run_ekf_preservation_output_fields()
+    fprintf('--- EKF Preservation: all output fields present and finite ---\n');
+
+    required_fields = {'xhat','xhatP','xhatQ','residual','residualP','residualQ', ...
+                       'S','chi2_stat','chi2_alarm'};
+
+    % Shared base structs
+    ekf_base.xhat = [ones(20,1)*6; ones(20,1)*0.1];
+    ekf_base.P    = eye(40) * 0.1;
+    ekf_base.P0   = 1;
+    ekf_base.Rk   = 0.01;
+    ekf_base.Qn   = 0.001;
+
+    cfg.dt     = 0.1;
+    cfg.c      = 340;
+    cfg.node_V = 100;
+
+    meas_p = ones(20,1) * 6;
+    meas_q = ones(20,1) * 0.1;
+
+    pass_count = 0;
+    fail_count = 0;
+    counterexample = '';
+
+    % ── Path A: fallback — params has .L, .D, .B but no .K ───────────────
+    try
+        params_A.B = eye(20) - diag(ones(19,1), -1);
+        params_A.L = ones(20,1) * 1000;
+        params_A.D = ones(20,1) * 0.3;
+        % No params_A.K
+
+        ekf_out_A = updateEKF(ekf_base, meas_p, meas_q, meas_p, meas_q, params_A, cfg);
+
+        [ok_A, missing_A] = check_fields(ekf_out_A, required_fields);
+        if ok_A
+            pass_count = pass_count + 1;
+            fprintf('    Path A (no params.K / fallback): PASS\n');
+        else
+            fail_count = fail_count + 1;
+            ce = sprintf('Path A: missing or non-finite fields: %s', missing_A);
+            fprintf('    Path A (no params.K / fallback): FAIL — %s\n', missing_A);
+            if isempty(counterexample), counterexample = ce; end
+        end
+    catch e
+        fail_count = fail_count + 1;
+        ce = sprintf('Path A: error — %s', e.message);
+        fprintf('    Path A (no params.K / fallback): FAIL — %s\n', e.message);
+        if isempty(counterexample), counterexample = ce; end
+    end
+
+    % ── Path B: primary — params.K present ───────────────────────────────
+    try
+        params_B.K = ones(20,1) * 0.05;
+        params_B.B = eye(20) - diag(ones(19,1), -1);
+        params_B.L = ones(20,1) * 1000;
+        params_B.D = ones(20,1) * 0.3;
+
+        ekf_out_B = updateEKF(ekf_base, meas_p, meas_q, meas_p, meas_q, params_B, cfg);
+
+        [ok_B, missing_B] = check_fields(ekf_out_B, required_fields);
+        if ok_B
+            pass_count = pass_count + 1;
+            fprintf('    Path B (params.K present):       PASS\n');
+        else
+            fail_count = fail_count + 1;
+            ce = sprintf('Path B: missing or non-finite fields: %s', missing_B);
+            fprintf('    Path B (params.K present):       FAIL — %s\n', missing_B);
+            if isempty(counterexample), counterexample = ce; end
+        end
+    catch e
+        fail_count = fail_count + 1;
+        ce = sprintf('Path B: error — %s', e.message);
+        fprintf('    Path B (params.K present):       FAIL — %s\n', e.message);
+        if isempty(counterexample), counterexample = ce; end
+    end
+
+    fprintf('    Ran 2 path checks: %d passed, %d failed\n', pass_count, fail_count);
+
+    if fail_count == 0
+        fprintf('  PASS\n');
+        r.status = 'PASS';
+        r.counterexample = '';
+    else
+        fprintf('  FAIL\n');
+        fprintf('  Counterexample: %s\n', counterexample);
+        r.status = 'FAIL';
+        r.counterexample = counterexample;
+    end
+    fprintf('\n');
+end
+
+% =========================================================================
+%  Helper: check that all required fields exist and are finite
+% =========================================================================
+function [ok, missing_str] = check_fields(s, fields)
+    missing = {};
+    for i = 1:numel(fields)
+        f = fields{i};
+        if ~isfield(s, f)
+            missing{end+1} = [f '(missing)']; %#ok<AGROW>
+        elseif ~all(isfinite(s.(f)(:)))
+            missing{end+1} = [f '(non-finite)']; %#ok<AGROW>
+        end
+    end
+    ok = isempty(missing);
+    missing_str = strjoin(missing, ', ');
 end

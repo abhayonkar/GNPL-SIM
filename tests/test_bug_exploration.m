@@ -58,11 +58,15 @@ function test_bug_exploration()
     fprintf('  EXPECTED: all four tests report BUG CONFIRMED\n');
     fprintf('=========================================================\n\n');
 
+    addpath(fullfile(pwd, 'scada'));
+
     results = struct();
-    results.bug1 = run_bug1_test();
-    results.bug2 = run_bug2_test();
-    results.bug3 = run_bug3_test();
-    results.bug4 = run_bug4_test();
+    results.bug1          = run_bug1_test();
+    results.bug2          = run_bug2_test();
+    results.bug3          = run_bug3_test();
+    results.bug4          = run_bug4_test();
+    results.ekf_bug       = run_ekf_bug_exploration_test();
+    results.ekf_fix_check = run_ekf_fix_check_test();
 
     fprintf('\n=========================================================\n');
     fprintf('  SUMMARY\n');
@@ -78,7 +82,7 @@ function test_bug_exploration()
     end
     fprintf('\n');
     if all_confirmed
-        fprintf('  Result: All 4 bugs confirmed on unfixed code.\n');
+        fprintf('  Result: All %d bugs confirmed on unfixed code.\n', numel(fields));
     else
         fprintf('  Result: One or more tests did not confirm the bug.\n');
         fprintf('          Check UNEXPECTED PASS entries above.\n');
@@ -349,4 +353,146 @@ function [valid, reason] = validate_csv_quick_unfixed(csv_path, cfg) %#ok<INUSD>
     catch e
         valid = false; reason = e.message;
     end
+end
+
+% -------------------------------------------------------------------------
+%  EKF Bug — buildJacobian fallback uses wrong field names (pipe_L_vec)
+%  Requirements 1.1, 1.2 (ekf-pipe-l-vec-bugfix spec)
+% -------------------------------------------------------------------------
+%
+% EXPECTED COUNTEREXAMPLE (unfixed code):
+%   Error: Unrecognized field name "pipe_L_vec".
+%   Location: updateEKF>buildJacobian (line 135)
+%             L_vec = params.pipe_L_vec(:);
+%   Root cause: buildJacobian fallback branch uses cfg field names
+%               (pipe_L_vec, pipe_D_vec) instead of params field names
+%               (L, D) as populated by initNetwork.
+%
+function r = run_ekf_bug_exploration_test()
+    fprintf('--- EKF Bug: buildJacobian fallback uses pipe_L_vec (ekf-pipe-l-vec-bugfix) ---\n');
+
+    addpath(fullfile(pwd, 'scada'));
+
+    % 1. Minimal ekf struct
+    ekf.xhat = zeros(40, 1);
+    ekf.P    = eye(40) * 0.1;
+    ekf.P0   = 1.0;
+    ekf.Rk   = 0.01;
+    ekf.Qn   = 0.001;
+
+    % 2. Minimal params struct — has L and D but NO K (triggers fallback)
+    params.B = eye(20) - diag(ones(19,1), -1);   % 20×20 chain incidence matrix
+    params.L = ones(20, 1) * 1000;               % pipe lengths: 1000 m each
+    params.D = ones(20, 1) * 0.3;                % pipe diameters: 0.3 m each
+    % NOTE: params.K is intentionally absent to trigger the buggy fallback branch
+
+    % 3. Minimal cfg struct
+    cfg.dt     = 0.1;
+    cfg.c      = 340;
+    cfg.node_V = 100;
+
+    r.status         = 'UNEXPECTED PASS';
+    r.counterexample = '';
+
+    try
+        updateEKF(ekf, ones(20,1)*5, ones(20,1)*0.1, ...
+                       ones(20,1)*5, ones(20,1)*0.1, params, cfg);
+
+        % If we reach here, no error was thrown
+        fprintf('  UNEXPECTED PASS: updateEKF completed without error (bug may be fixed)\n');
+        r.status = 'UNEXPECTED PASS';
+
+    catch e
+        if contains(e.message, 'pipe_L_vec')
+            ce = sprintf('error thrown: %s', e.message);
+            fprintf('  BUG CONFIRMED (crash on wrong field name pipe_L_vec)\n');
+            fprintf('  Counterexample: %s\n', ce);
+            r.status         = 'BUG CONFIRMED';
+            r.counterexample = ce;
+        else
+            % Different error — still a failure, document it
+            ce = sprintf('unexpected error: %s', e.message);
+            fprintf('  BUG CONFIRMED (unexpected error — different crash)\n');
+            fprintf('  Counterexample: %s\n', ce);
+            r.status         = 'BUG CONFIRMED';
+            r.counterexample = ce;
+        end
+    end
+    fprintf('\n');
+end
+
+% -------------------------------------------------------------------------
+%  EKF Fix Check — fallback path completes without error (Property 1)
+%  Requirements 2.1, 2.2 (ekf-pipe-l-vec-bugfix spec)
+% -------------------------------------------------------------------------
+%
+% Validates: Requirements 2.1, 2.2
+%
+function r = run_ekf_fix_check_test()
+    fprintf('--- EKF Fix Check: fallback path completes without error (Property 1) ---\n');
+
+    addpath(fullfile(pwd, 'scada'));
+
+    % 1. Minimal ekf struct
+    ekf.xhat = zeros(40, 1);
+    ekf.P    = eye(40) * 0.1;
+    ekf.P0   = 1.0;
+    ekf.Rk   = 0.01;
+    ekf.Qn   = 0.001;
+
+    % 2. Minimal params struct — has L and D but NO K (triggers fallback)
+    params.B = eye(20) - diag(ones(19,1), -1);   % 20×20 chain incidence matrix
+    params.L = ones(20, 1) * 1000;               % pipe lengths: 1000 m each
+    params.D = ones(20, 1) * 0.3;                % pipe diameters: 0.3 m each
+    % NOTE: params.K is intentionally absent to exercise the fixed fallback branch
+
+    % 3. Minimal cfg struct
+    cfg.dt     = 0.1;
+    cfg.c      = 340;
+    cfg.node_V = 100;
+
+    r.status         = 'FAIL';
+    r.counterexample = '';
+
+    try
+        ekf_out = updateEKF(ekf, ones(20,1)*5, ones(20,1)*0.1, ...
+                                 ones(20,1)*5, ones(20,1)*0.1, params, cfg);
+
+        % Assert all required output fields are present
+        required_fields = {'xhat', 'xhatP', 'xhatQ', 'residual', ...
+                           'residualP', 'residualQ', 'S', 'chi2_stat', 'chi2_alarm'};
+        missing = {};
+        for i = 1:numel(required_fields)
+            if ~isfield(ekf_out, required_fields{i})
+                missing{end+1} = required_fields{i}; %#ok<AGROW>
+            end
+        end
+
+        if ~isempty(missing)
+            msg = sprintf('missing fields: %s', strjoin(missing, ', '));
+            fprintf('  FAIL: %s\n', msg);
+            r.status         = 'FAIL';
+            r.counterexample = msg;
+        elseif numel(ekf_out.xhat) ~= 40
+            msg = sprintf('ekf.xhat has %d elements (expected 40)', numel(ekf_out.xhat));
+            fprintf('  FAIL: %s\n', msg);
+            r.status         = 'FAIL';
+            r.counterexample = msg;
+        elseif ~all(isfinite(ekf_out.xhat))
+            msg = 'ekf.xhat contains non-finite values';
+            fprintf('  FAIL: %s\n', msg);
+            r.status         = 'FAIL';
+            r.counterexample = msg;
+        else
+            fprintf('  PASS: updateEKF completed; ekf.xhat is 40x1 and finite\n');
+            r.status = 'PASS';
+        end
+
+    catch e
+        msg = sprintf('error thrown: %s', e.message);
+        fprintf('  FAIL: %s\n', msg);
+        r.status         = 'FAIL';
+        r.counterexample = msg;
+    end
+    fprintf('\n');
 end

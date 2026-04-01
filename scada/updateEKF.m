@@ -131,9 +131,10 @@ function F = buildJacobian(xhat, params, cfg, nN, nE)
         K_vec = params.K(:);
     else
         % Fallback: compute from pipe geometry
+        % params.L and params.D are populated by initNetwork (not pipe_L_vec/pipe_D_vec)
         lambda = 0.015;   % approximate Darcy friction factor
-        L_vec  = params.pipe_L_vec(:);
-        D_vec  = params.pipe_D_vec(:);
+        L_vec  = params.L(:);
+        D_vec  = params.D(:);
         K_vec  = sqrt(16 * lambda .* L_vec ./ (pi^2 .* D_vec.^5));
     end
 

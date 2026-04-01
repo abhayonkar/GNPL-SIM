@@ -74,7 +74,7 @@ function [t_jitter_ms, jitter_buf] = addScanJitter(log_dt_s, cfg, jitter_buf)
 
     %% Occasional spike (OS preemption / hardware event)
     if rand() < spike_p
-        spike = exprnd(spike_scale_ms);   % exponential tail
+        spike = -spike_scale_ms * log(rand());   % exponential tail (no toolbox)
         spike = min(spike, max_ms);
     else
         spike = 0;
