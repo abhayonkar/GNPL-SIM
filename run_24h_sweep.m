@@ -425,7 +425,7 @@ function cfg = build_scenario_config(scen, dur_min, fault_en)
 %  with run_24h_sweep('mode','quick').
 
     cfg   = simConfig();
-    % cfg = apply_cgd_overrides(cfg);   % ← Phase A: uncomment after storage fix
+    cfg = apply_cgd_overrides(cfg);   % ← Phase A: uncomment after storage fix
 
     cfg.T = dur_min * 60;
 
@@ -471,7 +471,8 @@ function cfg = build_scenario_config(scen, dur_min, fault_en)
             cfg.comp1_ratio_max = 1.00;
     end
 
-    cfg.n_attacks           = 0;
+    cfg.n_attacks           = 8;
+    cfg.forced_attack_id    = [];
     cfg.fault_enable        = fault_en;
     cfg.historian_enable    = false;   % suppress per-scenario historian files
 
@@ -576,7 +577,7 @@ function export_scenario_csv(logs, cfg, params, schedule, scen, fpath) %#ok<INUS
     for i=1:params.nNodes, hdr=[hdr sprintf(',ekf_resid_%s', char(nn(i)))]; end %#ok<AGROW>
     for i=1:params.nNodes, hdr=[hdr sprintf(',plc_p_%s',     char(nn(i)))]; end %#ok<AGROW>
     for i=1:params.nEdges, hdr=[hdr sprintf(',plc_q_%s',     char(en(i)))]; end %#ok<AGROW>
-    hdr=[hdr ',FAULT_ID,ATTACK_ID,label'];
+    hdr=[hdr ',FAULT_ID,ATTACK_ID,MITRE_CODE,prop_origin_node,prop_hop_node,prop_delay_s,prop_cascade_step,label'];
 
     %% Pre-extract
     if isfield(logs,'logValveStates') && size(logs.logValveStates,1)>=3
@@ -617,7 +618,26 @@ function export_scenario_csv(logs, cfg, params, schedule, scen, fpath) %#ok<INUS
         fprintf(fid, ',%.4f', logs.logResP(:,k));
         fprintf(fid, ',%.4f', logs.logPlcP(:,k));
         fprintf(fid, ',%.4f', logs.logPlcQ(:,k));
-        fprintf(fid, ',%d,0,%d\n', logFault(k), int32(logFault(k)>0));
+        % ATTACK_ID and MITRE_CODE
+        atk_id = logs.logAttackId(k);
+        mitre_str = char(logs.logMitreId(k));
+        mitre_lut = containers.Map( ...
+            {'None','T0831','T0838','T0855','T0829','T0827','T0814'}, ...
+            {0,      831,    838,    855,    829,    827,    814});
+        mc = 0;
+        if isKey(mitre_lut, mitre_str), mc = mitre_lut(mitre_str); end
+        % Phase C propagation columns
+        p_orig = 0; p_hop = 0; p_del = 0.0; p_cas = 0;
+        if isfield(logs,'logPropOrigin') && numel(logs.logPropOrigin) >= k
+            p_orig = logs.logPropOrigin(k);
+            p_hop  = logs.logPropHop(k);
+            p_del  = logs.logPropDelay(k);
+            p_cas  = logs.logPropCascade(k);
+        end
+        % label = 1 if fault OR attack, else 0
+        label = int32(logFault(k) > 0 || atk_id > 0);
+        fprintf(fid, ',%d,%d,%d,%d,%d,%.3f,%d,%d\n', ...
+                logFault(k), atk_id, mc, p_orig, p_hop, p_del, p_cas, label);
     end
     fclose(fid);
 end

@@ -344,10 +344,10 @@ function [valid, reason] = validate_csv_quick_unfixed(csv_path, cfg) %#ok<INUSD>
         end
         % BUG: accesses p_S1_bar and p_D1_bar — these columns do not exist
         % in the CSV written by exportDataset (which uses S1_bar, D1_bar).
-        if any(T.p_S1_bar < 0, 'all') || any(T.p_D1_bar < 0, 'all')
+        if any(T.S1_pressure_bar < 0 ...) || any(T.D1_pressure_bar < 0 ...)
             valid = false; reason = 'Negative pressure'; return;
         end
-        if any(T.p_S1_bar > 30, 'all')
+        if any(T.p_S1_bar > 27, 'all')
             valid = false; reason = 'Pressure exceeds MAOP+4 (30 barg)'; return;
         end
     catch e
