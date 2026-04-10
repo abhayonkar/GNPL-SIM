@@ -27,9 +27,9 @@ function [params, state] = initNetwork(cfg)
         params.B(cfg.edges(e,2), e) = -1;
     end
 
-    %% Per-edge pipe properties
-    params.D     = cfg.pipe_D_vec(:);
-    params.L     = cfg.pipe_L_vec(:);
+    %% Per-edge pipe properties  (clip to nEdges; pipe arrays may include resilience spares)
+    params.D     = cfg.pipe_D(1:params.nEdges);
+    params.L     = cfg.pipe_L(1:params.nEdges);
     params.rough = cfg.pipe_rough * ones(params.nEdges, 1);
     params.A     = pi/4 * params.D.^2;   % cross-sectional area (m^2)
 

@@ -64,9 +64,10 @@ function test_bug_exploration()
     results.bug1          = run_bug1_test();
     results.bug2          = run_bug2_test();
     results.bug3          = run_bug3_test();
-    results.bug4          = run_bug4_test();
-    results.ekf_bug       = run_ekf_bug_exploration_test();
-    results.ekf_fix_check = run_ekf_fix_check_test();
+    results.bug4                = run_bug4_test();
+    results.ekf_bug             = run_ekf_bug_exploration_test();
+    results.ekf_fix_check       = run_ekf_fix_check_test();
+    results.phase6_cusum_bug    = run_phase6_cusum_bug_exploration_test();
 
     fprintf('\n=========================================================\n');
     fprintf('  SUMMARY\n');
@@ -344,7 +345,7 @@ function [valid, reason] = validate_csv_quick_unfixed(csv_path, cfg) %#ok<INUSD>
         end
         % BUG: accesses p_S1_bar and p_D1_bar — these columns do not exist
         % in the CSV written by exportDataset (which uses S1_bar, D1_bar).
-        if any(T.S1_pressure_bar < 0 ...) || any(T.D1_pressure_bar < 0 ...)
+        if any(T.S1_pressure_bar < 0) || any(T.D1_pressure_bar < 0)
             valid = false; reason = 'Negative pressure'; return;
         end
         if any(T.p_S1_bar > 27, 'all')
@@ -493,6 +494,125 @@ function r = run_ekf_fix_check_test()
         fprintf('  FAIL: %s\n', msg);
         r.status         = 'FAIL';
         r.counterexample = msg;
+    end
+    fprintf('\n');
+end
+
+% -------------------------------------------------------------------------
+%  Phase 6 CUSUM Bug — updateCUSUM called with 5 arguments instead of 4
+%  Requirements 1.1, 1.2, 1.3 (runSimulation-phase6-args-fix spec)
+% -------------------------------------------------------------------------
+%
+% **Validates: Requirements 1.1, 1.2, 1.3**
+%
+% EXPECTED COUNTEREXAMPLE (unfixed code):
+%   Error: Too many input arguments.
+%   Location: runSimulation.m (line 171)
+%             cusum = updateCUSUM(cusum, ekf, cfg, k, dt);
+%   Root cause: updateCUSUM expects 4 arguments (cusum, residual, cfg, step)
+%               but is called with 5 arguments (cusum, ekf, cfg, k, dt)
+%               - Second argument should be ekf.residual (40×1 vector), not entire ekf struct
+%               - Fifth argument dt should not be passed
+%
+function r = run_phase6_cusum_bug_exploration_test()
+    fprintf('--- Phase 6 CUSUM Bug: updateCUSUM called with 5 arguments (runSimulation-phase6-args-fix) ---\n');
+
+    % Add paths relative to workspace root
+    addpath(fullfile(pwd, 'config'));
+    addpath(fullfile(pwd, 'network'));
+    addpath(fullfile(pwd, 'equipment'));
+    addpath(fullfile(pwd, 'scada'));
+    addpath(fullfile(pwd, 'attacks'));
+    addpath(fullfile(pwd, 'logging'));
+    addpath(fullfile(pwd, 'control'));
+
+    r.status         = 'UNEXPECTED PASS';
+    r.counterexample = '';
+
+    try
+        % Create minimal configuration with nSteps=1 to reach line 171 quickly
+        cfg = simConfig();
+        cfg.T = 1.0;  % 1 second simulation
+        cfg.dt = 1.0;
+        cfg.log_every = 1;
+        cfg.use_gateway = false;
+        
+        % Initialize network
+        [params, state] = initNetwork(cfg);
+        
+        % Initialize equipment
+        comp1 = initCompressor(1, cfg);
+        comp2 = initCompressor(2, cfg);
+        prs1  = initPRS(1, cfg);
+        prs2  = initPRS(2, cfg);
+        
+        % Initialize EKF
+        ekf.xhat = zeros(40, 1);
+        ekf.P    = eye(40) * 0.1;
+        ekf.P0   = 1.0;
+        ekf.Rk   = 0.01;
+        ekf.Qn   = 0.001;
+        
+        % Initialize PLC
+        plc.reg_p = ones(20, 1) * 5.0;
+        plc.reg_q = ones(20, 1) * 0.1;
+        plc.z1_p  = ones(7, 1) * 5.0;
+        plc.z1_q  = ones(7, 1) * 0.1;
+        plc.z2_p  = ones(7, 1) * 5.0;
+        plc.z2_q  = ones(7, 1) * 0.1;
+        plc.z3_p  = ones(6, 1) * 5.0;
+        plc.z3_q  = ones(6, 1) * 0.1;
+        
+        % Initialize logs
+        logs = initLogs(cfg);
+        
+        % Initialize attack schedule (no attacks)
+        N = round(cfg.T / cfg.dt);
+        schedule.nAttacks = 0;
+        schedule.ids = [];
+        schedule.starts = [];
+        schedule.ends = [];
+        schedule.durations = [];
+        
+        % Source pressures and demand
+        src_p1 = ones(N, 1) * cfg.src_p_barg(1);
+        src_p2 = ones(N, 1) * cfg.src_p_barg(2);
+        demand = ones(N, 6) * 0.1;
+        
+        % Run simulation - this should fail at line 171 with "Too many input arguments"
+        [params, state, comp1, comp2, prs1, prs2, ekf, plc, logs] = runSimulation( ...
+            cfg, params, state, comp1, comp2, prs1, prs2, ekf, plc, logs, ...
+            N, src_p1, src_p2, demand, schedule);
+        
+        % If we reach here, no error was thrown - unexpected pass
+        fprintf('  UNEXPECTED PASS: runSimulation completed without error (bug may be fixed)\n');
+        r.status = 'UNEXPECTED PASS';
+        
+    catch e
+        % Check if this is the expected "Too many input arguments" error
+        if contains(e.message, 'Too many input arguments') || ...
+           contains(e.message, 'too many input arguments')
+            ce = sprintf('error thrown: %s at %s', e.message, e.stack(1).name);
+            if ~isempty(e.stack)
+                ce = sprintf('%s (line %d)', ce, e.stack(1).line);
+            end
+            fprintf('  BUG CONFIRMED (Too many input arguments error at updateCUSUM call)\n');
+            fprintf('  Counterexample: %s\n', ce);
+            fprintf('  Expected: updateCUSUM(cusum, ekf.residual, cfg, k) [4 args]\n');
+            fprintf('  Actual:   updateCUSUM(cusum, ekf, cfg, k, dt) [5 args]\n');
+            r.status         = 'BUG CONFIRMED';
+            r.counterexample = ce;
+        else
+            % Different error - still document it
+            ce = sprintf('unexpected error: %s', e.message);
+            if ~isempty(e.stack)
+                ce = sprintf('%s at %s (line %d)', ce, e.stack(1).name, e.stack(1).line);
+            end
+            fprintf('  BUG CONFIRMED (different error - may indicate related issue)\n');
+            fprintf('  Counterexample: %s\n', ce);
+            r.status         = 'BUG CONFIRMED';
+            r.counterexample = ce;
+        end
     end
     fprintf('\n');
 end

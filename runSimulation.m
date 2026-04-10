@@ -63,6 +63,7 @@ function [params, state, comp1, comp2, prs1, prs2, ekf, plc, logs] = runSimulati
     replay_k_attack = 0;
     prev_aid        = 0;
     wall_t0         = tic;
+    demand_vec      = zeros(params.nNodes, 1);   % initialised here; updated each step at §6
 
     logEvent('INFO','runSimulation', ...
              sprintf('Phase 6 start: N=%d  log_every=%d  N_log=%d', ...
@@ -89,8 +90,7 @@ function [params, state, comp1, comp2, prs1, prs2, ekf, plc, logs] = runSimulati
         params.turb_state = turb_state;
 
         %% 3. Flow
-        [state.q, state] = updateFlow(params, state, valve_states);
-
+        [state.q, dp] = updateFlow(cfg, state.p, demand_vec);
         %% 4. A8 leak
         if aid == 8
             k_s8 = max(1, round(schedule.start_s(find(schedule.ids==8,1))/dt));
@@ -168,7 +168,7 @@ function [params, state, comp1, comp2, prs1, prs2, ekf, plc, logs] = runSimulati
         ekf = updateEKF(ekf, plc.reg_p, plc.reg_q, state.p, state.q, params, cfg);
 
         %% 18. CUSUM detector ────────────────────────────────────── Phase 6
-        cusum = updateCUSUM(cusum, ekf, cfg, k, dt);
+        cusum = updateCUSUM(cusum, ekf.residual, cfg, k);
 
         %% 19. Control logic
         if aid ~= 2

@@ -1,6 +1,7 @@
 function cusum = initCUSUM(cfg)
     cusum.S_upper       = 0;
     cusum.S_lower       = 0;
+    cusum.n_steps       = 0;
     cusum.alarm         = false;
     cusum.alarm_count   = 0;
     cusum.nx            = 40;

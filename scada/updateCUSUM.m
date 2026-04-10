@@ -2,7 +2,7 @@ function [cusum, alarm] = updateCUSUM(cusum, residual, cfg, step)
 % updateCUSUM  Two-sided CUSUM detector with cold-start warmup guard.
 %
 % INPUTS
-%   cusum     : struct with fields S_pos, S_neg, n_steps (persistent state)
+%   cusum     : struct with fields S_upper, S_lower, n_steps (persistent state)
 %   residual  : scalar or Nx1 vector of normalised residuals at current step
 %   cfg       : simConfig struct (reads cusum_slack, cusum_threshold,
 %               cusum_warmup_steps, cusum_reset_on_trip)
@@ -19,7 +19,7 @@ function [cusum, alarm] = updateCUSUM(cusum, residual, cfg, step)
 %
 % Verification:
 %   >> cfg = simConfig();
-%   >> cs = struct('S_pos',0,'S_neg',0,'n_steps',0);
+%   >> cs = struct('S_upper',0,'S_lower',0,'n_steps',0,'alarm',false,'alarm_count',0);
 %   >> for k=1:600; r=randn(20,1)*0.5; [cs,al]=updateCUSUM(cs,r,cfg,k); end
 %   >> % al should be 0 throughout (no alarm on white noise with slack=2.5)
 
@@ -38,8 +38,8 @@ function [cusum, alarm] = updateCUSUM(cusum, residual, cfg, step)
     end
 
     % Two-sided CUSUM update (Page 1954)
-    cusum.S_pos = max(0, cusum.S_pos + r - k);
-    cusum.S_neg = max(0, cusum.S_neg - r - k);
+    cusum.S_upper = max(0, cusum.S_upper + r - k);
+    cusum.S_lower = max(0, cusum.S_lower - r - k);
 
     % ----------------------------------------------------------------
     % Cold-start guard: suppress alarm evaluation during warmup window
@@ -48,15 +48,17 @@ function [cusum, alarm] = updateCUSUM(cusum, residual, cfg, step)
 
     if in_warmup
         alarm = false;
+        cusum.alarm = false;
         return
     end
 
     % Threshold test
-    alarm = (cusum.S_pos > h) || (cusum.S_neg > h);
+    alarm = (cusum.S_upper > h) || (cusum.S_lower > h);
+    cusum.alarm = alarm;
 
     % Optional reset on trip
     if alarm && cfg.cusum_reset_on_trip
-        cusum.S_pos = 0;
-        cusum.S_neg = 0;
+        cusum.S_upper = 0;
+        cusum.S_lower = 0;
     end
 end

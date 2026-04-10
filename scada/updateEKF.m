@@ -82,6 +82,8 @@ function ekf = updateEKF(ekf, meas_p, meas_q, true_p, true_q, params, cfg)
     ekf.residual  = inn;
     ekf.residualP = inn(1:nN);
     ekf.residualQ = inn(nN+1:end);
+    ekf.residP    = ekf.residualP;   % alias used by detectIncidents
+    ekf.residQ    = ekf.residualQ;
 
     %% ── Innovation covariance S (passed to CUSUM) ────────────────────────
     ekf.S = S;
