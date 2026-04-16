@@ -1,0 +1,15 @@
+{
+  "total_rows": 502638,
+  "n_scenarios": 282,
+  "n_features": 174,
+  "normal_rows": 502638,
+  "anomaly_rows": 0,
+  "attack_ids_present": [
+    0
+  ],
+  "models_trained": [
+    "iforest"
+  ],
+  "physics_fixed": "node_V=500, relax=0.3, clamp=[12,28]",
+  "schema_version": "v2.0-phase-3"
+}

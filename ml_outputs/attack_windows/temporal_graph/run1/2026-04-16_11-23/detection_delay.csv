@@ -1,0 +1,4 @@
+attack_id,attack_name,model,delay_steps
+9,FDI_Stealthy,LSTM-AE,4
+9,FDI_Stealthy,GNN,32
+9,FDI_Stealthy,Hybrid-IDS,4
