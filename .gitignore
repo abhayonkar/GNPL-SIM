@@ -1,9 +1,12 @@
-# Large data files and logs
+Large data files and logs
+
 automated_dataset/
 logs/
 middleware/logs/
 
-# MATLAB files
+
+MATLAB files
+
 *.asv
 *.m~
 *.mat
@@ -13,15 +16,17 @@ middleware/logs/
 *.slxc
 *.sldd
 
-# Data files
+Data files
+
 *.csv
 *.log
 *.json
 *.yaml
 *.yml
 
-# Python
-__pycache__/
+Python
+
+pycache/
 *.pyc
 *.pyo
 *.pyd
@@ -34,15 +39,17 @@ venv.bak/
 pip-log.txt
 pip-delete-this-directory.txt
 
-# IDE
+IDE
+
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-*.sublime-*
+.sublime-
 
-# OS
+OS
+
 .DS_Store
 .DS_Store?
 ._*
@@ -51,34 +58,66 @@ pip-delete-this-directory.txt
 ehthumbs.db
 Thumbs.db
 
-# Windows
+Windows
+
 Thumbs.db
 Desktop.ini
 
-# Node modules
+Node modules
+
 node_modules/
 GNPL-arc/node_modules/
 
+Temporary files
 
-
-# Temporary files
 *.tmp
 *.temp
 *.bak
 *.backup
 *.old
 
-# Documentation
+Documentation
+
 *.docx
 *.pdf
 *.pptx
 *.xlsx
-# Specific large data files to ignore
-data/*.csv
-automated_dataset/*.csv
-automated_dataset/*.log
-automated_dataset/*.json
 
-# Keep only code and configuration files
+Specific large data files to ignore
+
+data/.csv
+automated_dataset/.csv
+automated_dataset/.log
+automated_dataset/.json
+
+--- NEW UPDATES ---
+
+Ignore specific Sim subdirectories
+
+.kiro
+New docs/
+data/
+files/
+
+
+
+!ml_pipeline/
+
+# Ignore .ipynb, .pkl, .pt files and .ipynb_checkpoints folder in ml_pipeline
+ml_pipeline/**/*.ipynb
+ml_pipeline/**/*.pkl
+ml_pipeline/**/*.pt
+ml_pipeline/**/.ipynb_checkpoints/
+
+ml_outputs/**/*.ipynb
+ml_outputs/**/*.pkl
+ml_outputs/**/*.pt
+ml_outputs/**/.ipynb_checkpoints/
+
+
+--- END NEW UPDATES ---
+
+Keep only code and configuration files
+
 !data/README.md
 !automated_dataset/README.md
