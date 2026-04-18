@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3:*)",
+      "Bash(ls \"c:\\\\Users\\\\Abhay.DESKTOP-HP65TET\\\\Documents\\\\Sim\\\\New docs\"\" 2>/dev/null && ls \"c:UsersAbhay.DESKTOP-HP65TETDocumentsSim.kiro\"\")"
+    ]
+  }
+}

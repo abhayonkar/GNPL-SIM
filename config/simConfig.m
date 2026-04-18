@@ -176,8 +176,8 @@ function cfg = simConfig()
     % EKF PARAMETERS
     % ================================================================
     cfg.ekf_n_states   = 40;        % 20 pressures + 20 flows
-    cfg.ekf_Q_diag     = 1e-4;      % process noise
-    cfg.ekf_R_diag     = 1e-3;      % measurement noise
+    cfg.ekf_R_diag     = 0.05;     % WAS: 1e-3 → EKF over-trusted measurements
+    cfg.ekf_Q_diag     = 1e-3;     % WAS: 1e-4 → more process uncertainty
     cfg.ekf_P0_diag    = 1e-2;      % initial covariance
 
     % ================================================================
@@ -261,7 +261,7 @@ function cfg = simConfig()
     % ================================================================
     % SOURCE 2 (S2) PRESSURE LIMITS
     % ================================================================
-    cfg.src2_p_min = 20.0;   % [barg]
+    cfg.src2_p_min = 14.0;   % [barg]
     cfg.src2_p_max = 26.0;   % [barg]
 
     % ================================================================
@@ -316,7 +316,8 @@ function cfg = simConfig()
     cfg.src_med_amp   = 0.20;   % [barg]  medium oscillation amplitude (~6 min cycle)
     cfg.src_fast_amp  = 0.10;   % [barg]  fast fluctuation amplitude (~75 s cycle)
     cfg.src_trend     = 0.00;   % [barg]  total linear drift over simulation
-    cfg.src_rw_amp    = 0.15;   % [barg]  AR(1) random walk amplitude
+    cfg.dem_spike_prob    = 0.15;   % NEW: 15% chance of demand spike per scenario
+    cfg.src_rw_amp        = 0.30;   % WAS: 0.15 → more source pressure variability
     cfg.src_ar1_alpha = 0.98;   % AR(1) correlation coefficient for source random walk
 
     % ================================================================
@@ -452,13 +453,16 @@ function cfg = simConfig()
     % A1: Source pressure spike + oscillation
     cfg.atk1_spike_amp = 1.30;    % spike multiplier (1.30 = +30% of nominal)
     cfg.atk1_osc_freq  = 0.01;    % [Hz]  oscillation frequency during A1
+    cfg.atk1_spike_dur_s = 180.0;  % WAS: implicit 60s
 
     % A2: Compressor ratio ramp-up (overspeed)
     cfg.atk2_ramp_time    = 30.0;               % [s]  ramp duration
-    cfg.atk2_target_ratio = cfg.comp_ratio_max; % ramp to maximum ratio (1.6)
+    cfg.atk2_target_ratio = 1.55; % ramp to maximum ratio (1.6)
 
     % A3: Valve forced-state injection
-    cfg.atk3_cmd = 0;    % force valve to this state (0=closed, 1=open)
+    cfg.atk3_ramp_time = 30.0;     % NEW: ramp valve 0→1 over 30s (not instant)
+    cfg.atk3_cmd       = 0.0;      % keep forced-close
+    cfg.valve_leak_frac = 0.3;     % NEW: partial close (0.3 open) before full close
 
     % A4: Demand injection (false high-demand)
     cfg.atk4_ramp_time    = 60.0;           % [s]  ramp duration
@@ -467,11 +471,14 @@ function cfg = simConfig()
 
     % A5: Pressure sensor spoof (single node additive bias)
     cfg.atk5_target_node = 15;     % D1 delivery node
-    cfg.atk5_bias_bar    = 2.0;    % [barg]  additive bias
+    cfg.atk5_bias_bar    = 4.0;    % [barg]  additive bias
+    cfg.atk5_osc_amp   = 1.5;      % NEW: add sinusoidal component
+    cfg.atk5_osc_freq  = 0.05;     % NEW: 0.05 Hz oscillation on top of bias
+
 
     % A6: Flow meter spoof (scale selected edges to zero)
     cfg.atk6_edges = [7, 8];    % CS2->J5 and J5->J6
-    cfg.atk6_scale = 0.0;       % scale factor (0 = zero-out)
+    cfg.atk6_scale = 0.40;       % scale factor (0 = zero-out)
 
     % A9: FDI ramp bias across multiple nodes
     cfg.atk9_ramp_s       = 60.0;           % [s]  ramp time

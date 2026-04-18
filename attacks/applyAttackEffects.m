@@ -111,9 +111,16 @@ function [src_p1_out, src_p2_out, comp1, comp2, plc, valve_states, demand_out] =
             [k_s, ~] = window(3);
             if k >= k_s
                 elapsed = (k - k_s) * dt;
-                cycle   = 90;   % on/off period (s)
-                if mod(floor(elapsed / cycle), 2) == 0
-                    valve_states(1) = cfg.atk3_cmd;   % force E8 closed/open
+                % Phase 1 (0-30s): ramp from open to partial
+                % Phase 2 (30-90s): cycle between partial and closed
+                cycle = 90;
+                if elapsed < cfg.atk3_ramp_time
+                    frac = elapsed / cfg.atk3_ramp_time;
+                    valve_states(1) = 1.0 - frac * (1.0 - cfg.valve_leak_frac);
+                elseif mod(floor(elapsed / cycle), 2) == 0
+                    valve_states(1) = cfg.atk3_cmd;
+                else
+                    valve_states(1) = cfg.valve_leak_frac;
                 end
             end
 

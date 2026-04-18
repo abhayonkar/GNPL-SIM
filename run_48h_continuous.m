@@ -118,7 +118,7 @@ function run_48h_continuous(varargin)
 
     % Build the per-step label array from attack_plan
     schedule = attack_plan_to_schedule(attack_plan, N, dt);
-
+    atk_start_s_vec = schedule.attack_start_s;   % N×1 — 0=normal, else=attack start [s]
     %% ── Open CSV writer (streaming — don't hold 172K rows in memory) ─────
     csv_path = fullfile(opt.out_dir, 'physics_dataset.csv');
     csv_fid  = open_streaming_csv(csv_path, params);
@@ -294,6 +294,7 @@ function run_48h_continuous(varargin)
                                 cusum, sensor_p, sensor_q, src_p1_k, src_p2_k, ...
                                 demand_k, q_sto, aid, fault_label, ...
                                 schedule, k, params, cfg, ...
+                                atk_start_s_vec(k), ...   % ← new arg
                                 current_regime - 1);
         end
 
@@ -475,9 +476,10 @@ function plan = build_continuous_attack_schedule(N, dt, density, cfg)
     plan.ids = randi(10, 1, n_attacks);
 
     % Place with minimum gap
-    min_gap  = 600;   % 10 min between attacks
-    warmup   = 1800;  % first attack no earlier than 30 min
-    recovery = 600;
+    min_gap  = 600;    % 10 min between attacks
+    warmup   = 86400;  % ← CHANGED: first attack no earlier than 24h
+                       %   Gives LSTM ~86k clean rows to train on (first 80%)
+    recovery = 1800;   % ← increased from 600 — clean tail for evaluation
 
     durs = cfg.atk_dur_min_s + (cfg.atk_dur_max_s - cfg.atk_dur_min_s) * rand(1, n_attacks);
     plan.dur_s = durs;
@@ -518,16 +520,13 @@ function schedule = attack_plan_to_schedule(plan, N, dt)
     schedule.dur_s       = plan.dur_s;
     schedule.params      = cell(1, plan.n_attacks);
 
+    attack_start_s_vec = zeros(N, 1);
     for i = 1:plan.n_attacks
-        aid   = plan.ids(i);
-        k_s   = max(1, round(plan.start_s(i) / dt));
-        k_e   = min(N, round((plan.start_s(i) + plan.dur_s(i)) / dt));
-        schedule.label_id(k_s:k_e)    = int32(aid);
-        if aid <= numel(names)
-            schedule.label_name(k_s:k_e)  = names(aid);
-            schedule.label_mitre(k_s:k_e) = mitres(aid);
-        end
+        k_s = max(1, round(plan.start_s(i) / dt));
+        k_e = min(N, round((plan.start_s(i) + plan.dur_s(i)) / dt));
+        attack_start_s_vec(k_s:k_e) = plan.start_s(i);
     end
+    schedule.attack_start_s = attack_start_s_vec;   % new field on schedule struct
 end
 
 
@@ -588,7 +587,8 @@ function fid = open_streaming_csv(fpath, params)
     for i = 1:params.nNodes, hdr = [hdr sprintf(',ekf_resid_%s', char(nn(i)))]; end %#ok
     for i = 1:params.nNodes, hdr = [hdr sprintf(',plc_p_%s', char(nn(i)))]; end %#ok
     for i = 1:params.nEdges, hdr = [hdr sprintf(',plc_q_%s', char(en(i)))]; end %#ok
-    hdr = [hdr ',FAULT_ID,ATTACK_ID,MITRE_CODE,label'];
+    hdr = [hdr ',FAULT_ID,ATTACK_ID,ATTACK_START_S,MITRE_CODE,label'];
+    %        ↑ added ATTACK_START_S between ATTACK_ID and MITRE_CODE
     fprintf(fid, '%s\n', hdr);
 end
 
@@ -597,7 +597,7 @@ function write_streaming_row(fid, log_k, t_s, state, ekf, plc, ...
                               comp1, comp2, prs1, prs2, valve_states, ...
                               cusum, sensor_p, sensor_q, src_p1, src_p2, ...
                               demand_k, q_sto, aid, fault_label, ...
-                              schedule, k, params, cfg, regime_id)
+                              schedule, k, params, cfg, atk_start_s, regime_id)
 
     mitre_str = char(schedule.label_mitre(k));
     mitre_lut = containers.Map( ...
@@ -622,7 +622,8 @@ function write_streaming_row(fid, log_k, t_s, state, ekf, plc, ...
     fprintf(fid, ',%.4f', ekf.xhat(1:params.nNodes) - state.p);
     fprintf(fid, ',%.4f', plc.reg_p);
     fprintf(fid, ',%.4f', plc.reg_q);
-    fprintf(fid, ',%d,%d,%d,%d\n', fault_label, aid, mc, label);
+    fprintf(fid, ',%d,%d,%.1f,%d,%d\n', fault_label, aid, atk_start_s, mc, label);
+    
 end
 
 
