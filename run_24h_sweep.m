@@ -475,7 +475,7 @@ function cfg = build_scenario_config(scen, dur_min, fault_en)
     cfg.forced_attack_id    = [];
     cfg.fault_enable        = fault_en;
     cfg.historian_enable    = false;   % suppress per-scenario historian files
-
+    cfg = randomize_attack_params(cfg, scen.id); 
     %% Gateway fields — populated by open_gateway_sockets() if gateway=true
     cfg.use_gateway       = false;
     cfg.gateway_timeout_s = 0.5;

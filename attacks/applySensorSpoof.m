@@ -2,44 +2,37 @@ function [sensor_p_out, sensor_q_out] = applySensorSpoof( ...
         aid, k, dt, schedule, sensor_p, sensor_q, cfg, ekf, replay_buf)
 % applySensorSpoof  Apply post-measurement sensor manipulation attacks.
 %
-%   [sensor_p_out, sensor_q_out] = applySensorSpoof(
-%       aid, k, dt, schedule, sensor_p, sensor_q, cfg, ekf, replay_buf)
-%
-%   Called AFTER sensor noise is added, BEFORE ADC quantisation.
-%   Routes each attack to its specific implementation:
-%
-%   A5 — PressureSensorSpoofing:
-%        Additive bias on target pressure node. Simple but detectable by EKF.
-%
-%   A6 — FlowMeterSpoofing:
-%        Multiplicative scaling on target flow edges. Creates mass imbalance
-%        detectable by Darcy-Weisbach cross-validation.
-%
-%   A9 — Stealthy FDI (Liu-Ning-Reiter):
-%        a = H*c with H=I. Zero EKF residual by construction.
-%        Implemented in computeFDIVector.m.
-%        Requires ekf argument.
-%
-%   A10 — Replay Attack (Mo & Sinopoli):
-%        Replace all sensor channels with pre-recorded buffer content.
-%        Implemented in applyReplayAttack.m.
-%        Requires replay_buf argument.
-%
-%   IMPORTANT: A9 and A10 are applied to sensor readings BEFORE ADC
-%   quantisation in runSimulation.m — this is the correct order because
-%   real attackers inject into the communication layer after the ADC.
+%   Routes each attack to its implementation:
+%   A5 — PressureSensorSpoofing: bias + sinusoidal oscillation (atk5_osc_amp/freq)
+%   A6 — FlowMeterSpoofing: multiplicative scaling on target edges
+%   A9 — Stealthy FDI: a=H*c, zero EKF residual by construction
+%   A10 — Replay: no-op here; handled in runSimulation via applyReplayAttack
 
     sensor_p_out = sensor_p;
     sensor_q_out = sensor_q;
 
     switch aid
 
-        case 5   % A5: Pressure sensor bias on target node
+        case 5   % A5: Pressure sensor bias + oscillation on target node
             if nargin >= 7 && isfield(cfg, 'atk5_target_node')
-                k_start = find_attack_start(schedule, 5);
-                frac    = min(1, (k - k_start) * dt / 30);   % 30s ramp
+                k_start  = find_attack_start(schedule, 5);
+                elapsed  = (k - k_start) * dt;
+
+                % 30-second linear ramp-in
+                frac    = min(1, elapsed / 30);
+
+                % Base bias
+                bias = cfg.atk5_bias_bar * frac;
+
+                % Sinusoidal oscillation component (NEW)
+                if isfield(cfg, 'atk5_osc_amp') && isfield(cfg, 'atk5_osc_freq')
+                    osc = cfg.atk5_osc_amp * frac * sin(2*pi * cfg.atk5_osc_freq * elapsed);
+                else
+                    osc = 0;
+                end
+
                 sensor_p_out(cfg.atk5_target_node) = ...
-                    sensor_p(cfg.atk5_target_node) + cfg.atk5_bias_bar * frac;
+                    sensor_p(cfg.atk5_target_node) + bias + osc;
             end
 
         case 6   % A6: Flow meter scaling on target edges
@@ -55,17 +48,13 @@ function [sensor_p_out, sensor_q_out] = applySensorSpoof( ...
         case 9   % A9: Stealthy FDI — zero EKF residual
             if nargin >= 8 && ~isempty(ekf)
                 k_start  = find_attack_start(schedule, 9);
-                k_local  = k - k_start;   % steps since this attack started
+                k_local  = k - k_start;
                 [a_p, a_q, ~] = computeFDIVector(ekf, cfg, k_local, dt);
                 sensor_p_out = sensor_p + a_p;
                 sensor_q_out = sensor_q + a_q;
             end
 
-        case 10  % A10: Replay attack — frozen noise realisation
-            % replay_buf is managed externally in runSimulation.m
-            % This case is a no-op here; replay is applied directly in
-            % runSimulation via applyReplayAttack() before this function.
-            % Included for completeness in the aid routing table.
+        case 10  % A10: no-op — handled externally via applyReplayAttack
 
     end
 end
@@ -73,7 +62,6 @@ end
 % ── helper ────────────────────────────────────────────────────────────────
 
 function k_start = find_attack_start(schedule, target_aid)
-% Return the physics step at which the given attack ID starts.
     idx = find(schedule.ids == target_aid, 1);
     if isempty(idx)
         k_start = 0;

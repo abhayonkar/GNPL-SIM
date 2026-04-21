@@ -460,9 +460,11 @@ function cfg = simConfig()
     cfg.atk2_target_ratio = 1.55; % ramp to maximum ratio (1.6)
 
     % A3: Valve forced-state injection
-    cfg.atk3_ramp_time = 30.0;     % NEW: ramp valve 0→1 over 30s (not instant)
-    cfg.atk3_cmd       = 0.0;      % keep forced-close
-    cfg.valve_leak_frac = 0.3;     % NEW: partial close (0.3 open) before full close
+    cfg.atk3_ramp_time    = 30.0;   % NEW: ramp valve 0→1 over 30s (not instant)
+    cfg.atk3_cmd          = 0.0;    % keep forced-close
+    cfg.valve_leak_frac   = 0.3;    % generic alias (backward compat)
+    cfg.atk3_leak_frac    = 0.3;    % A3-specific partial open during hold [0,1]
+    cfg.atk3_cycle_period = 90.0;   % [s] toggle cycle between partial and closed
 
     % A4: Demand injection (false high-demand)
     cfg.atk4_ramp_time    = 60.0;           % [s]  ramp duration

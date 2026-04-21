@@ -111,16 +111,18 @@ function [src_p1_out, src_p2_out, comp1, comp2, plc, valve_states, demand_out] =
             [k_s, ~] = window(3);
             if k >= k_s
                 elapsed = (k - k_s) * dt;
-                % Phase 1 (0-30s): ramp from open to partial
-                % Phase 2 (30-90s): cycle between partial and closed
-                cycle = 90;
+                % Phase 1 (0-ramp_time): ramp from open to partial
+                % Phase 2 (ramp_time+): cycle between partial and closed
+                % Use per-scenario randomized params (set by randomize_attack_params)
+                leak_frac = cfg.atk3_leak_frac;   % [0.1, 0.4] per scenario
+                cycle     = cfg.atk3_cycle_period; % [60, 120]s per scenario
                 if elapsed < cfg.atk3_ramp_time
                     frac = elapsed / cfg.atk3_ramp_time;
-                    valve_states(1) = 1.0 - frac * (1.0 - cfg.valve_leak_frac);
+                    valve_states(1) = 1.0 - frac * (1.0 - leak_frac);
                 elseif mod(floor(elapsed / cycle), 2) == 0
                     valve_states(1) = cfg.atk3_cmd;
                 else
-                    valve_states(1) = cfg.valve_leak_frac;
+                    valve_states(1) = leak_frac;
                 end
             end
 
