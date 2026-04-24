@@ -1,0 +1,2 @@
+# This file ensures the archive directory is tracked by git
+# Archive files (*.tar.gz) will be added here by the baseline preservation system

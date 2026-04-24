@@ -4,9 +4,22 @@ function exportDataset(logs, cfg, params, N, schedule)
 %   Timestamp column uses the effective log timestep:
 %     log_dt = cfg.dt * cfg.log_every   (e.g. 0.1 * 10 = 1.0 s per row)
 %   so Timestamp_s increments by 1.0 for a 1 Hz logged dataset.
+%
+%   Provenance: every CSV starts with a comment line:
+%     # provenance git_sha=<sha> simulator_version=<ver> generated_at=<iso8601> config_hash=<sha256>
+%   followed by the regular column header on the next line.
+%   Downstream readers must skip lines beginning with '#'.
 
     outDir = 'automated_dataset';
     if ~exist(outDir, 'dir'), mkdir(outDir); end
+
+    % ── Provenance metadata ──────────────────────────────────────────────────
+    prov_sha   = getGitCommitSha();
+    prov_ver   = getSimulatorVersion();
+    prov_ts    = datestr(now, 'yyyy-mm-ddTHH:MM:SS');
+    prov_hash  = hashConfig(cfg, params);
+    prov_line  = sprintf('# provenance git_sha=%s simulator_version=%s generated_at=%s config_hash=%s', ...
+                         prov_sha, prov_ver, prov_ts, prov_hash);
 
     % Effective logging time step
     if isfield(cfg, 'log_every') && cfg.log_every > 1
@@ -84,6 +97,7 @@ function exportDataset(logs, cfg, params, N, schedule)
 
     %% ── master_dataset.csv ───────────────────────────────────────────────
     fid = fopen(fullfile(outDir, 'master_dataset.csv'), 'w');
+    fprintf(fid, '%s\n', prov_line);          % provenance comment line
     fprintf(fid, '%s,', col_names{1:end-3});
     fprintf(fid, 'ATTACK_ID,ATTACK_NAME,MITRE_ID\n');
     for k = 1:N_log
@@ -98,8 +112,8 @@ function exportDataset(logs, cfg, params, N, schedule)
     %% ── Normal / attack splits ───────────────────────────────────────────
     normal_mask = (logs.logAttackId(1:N_log) == 0);
     attack_mask = (logs.logAttackId(1:N_log)  > 0);
-    writeSubset(fullfile(outDir, 'normal_only.csv'),  col_names, num_data, logs, normal_mask, N_log);
-    writeSubset(fullfile(outDir, 'attacks_only.csv'), col_names, num_data, logs, attack_mask, N_log);
+    writeSubset(fullfile(outDir, 'normal_only.csv'),  col_names, num_data, logs, normal_mask, N_log, prov_line);
+    writeSubset(fullfile(outDir, 'attacks_only.csv'), col_names, num_data, logs, attack_mask, N_log, prov_line);
     fprintf('[export] normal_only.csv:  %d rows\n', sum(normal_mask));
     fprintf('[export] attacks_only.csv: %d rows\n', sum(attack_mask));
 
@@ -174,8 +188,9 @@ function v = getfield_safe(logs, fname1, fname2, default)
     end
 end
 
-function writeSubset(fpath, col_names, num_data, logs, mask, N_log)
+function writeSubset(fpath, col_names, num_data, logs, mask, N_log, prov_line)
     fid = fopen(fpath,'w');
+    fprintf(fid,'%s\n', prov_line);          % provenance comment line
     fprintf(fid,'%s,',col_names{1:end-3});
     fprintf(fid,'ATTACK_ID,ATTACK_NAME,MITRE_ID\n');
     idx = find(mask);
@@ -187,4 +202,48 @@ function writeSubset(fpath, col_names, num_data, logs, mask, N_log)
                 char(logs.logAttackName(k)),char(logs.logMitreId(k)));
     end
     fclose(fid);
+end
+
+%% ── Provenance helpers ────────────────────────────────────────────────────────
+
+function sha = getGitCommitSha()
+% Returns the short git commit SHA (7 chars) or 'unknown' if git is unavailable.
+    [status, out] = system('git rev-parse --short HEAD 2>/dev/null');
+    if status == 0
+        sha = strtrim(out);
+    else
+        sha = 'unknown';
+    end
+end
+
+function ver = getSimulatorVersion()
+% Returns simulator version from VERSION file, or the full git SHA as fallback.
+    ver_file = fullfile(fileparts(mfilename('fullpath')), '..', 'VERSION');
+    if exist(ver_file, 'file')
+        fid = fopen(ver_file, 'r');
+        ver = strtrim(fgetl(fid));
+        fclose(fid);
+    else
+        [status, out] = system('git rev-parse HEAD 2>/dev/null');
+        if status == 0
+            ver = strtrim(out);
+        else
+            ver = 'unknown';
+        end
+    end
+end
+
+function h = hashConfig(cfg, params)
+% Computes a short hash of key simulation config fields.
+% Uses a deterministic string serialisation; does NOT require crypto toolbox.
+    cfg_str = sprintf('dt=%.6f|log_every=%d|nNodes=%d|nEdges=%d|comp1=%.4f|comp2=%.4f|p0=%.4f', ...
+        cfg.dt, cfg.log_every, params.nNodes, params.nEdges, ...
+        cfg.comp1_ratio, cfg.comp2_ratio, cfg.p0);
+    % Compute a simple FNV-1a 32-bit hash (no toolbox required)
+    hash_val = uint32(2166136261);
+    for i = 1:numel(cfg_str)
+        hash_val = bitxor(hash_val, uint32(cfg_str(i)));
+        hash_val = uint32(mod(uint64(hash_val) * uint64(16777619), uint64(2^32)));
+    end
+    h = sprintf('%08x', hash_val);
 end

@@ -70,25 +70,37 @@ function [resid_p, resid_q] = computeWeymouthResiduals(ekf, state, params, cfg)
 
     q_wey  = sign(dp_abs) .* sqrt(max(0, K_e .* abs(dp_abs) .* p_sum));  % SCMD
 
+    %% Unit conversion: state.q is in kg/s; Weymouth K_e is calibrated for SCMD
+    %  Standard gas density at (Tb, Pb):
+    %    rho_std = Pb * (SG * M_air) / (R_gas * Tb)   [kg/m3]
+    %  where M_air = 28.97 kg/kmol (molar mass of dry air)
+    %        R_gas = 8.314 kPa·m3/(kmol·K)
+    %  Conversion: q_SCMD = q_kgs * 86400 / rho_std
+    M_air        = 28.97;                                     % kg/kmol
+    R_gas        = 8.314;                                     % kPa·m3/(kmol·K)
+    rho_std_kgm3 = Pb * (SG * M_air) / (R_gas * Tb);         % kg/m3
+    kgs_to_scmd  = 86400 / rho_std_kgm3;                     % SCMD per (kg/s)
+
     %% Flow residual: PLC reading vs Weymouth prediction
-    q_plc    = state.q(1:nE);   % current flow (already updated by updateFlow)
-    resid_q  = q_plc - q_wey;
+    q_plc      = state.q(1:nE);           % kg/s (PLC bus reading)
+    q_plc_scmd = q_plc * kgs_to_scmd;    % SCMD — same units as q_wey
+    resid_q    = (q_plc_scmd - q_wey) / kgs_to_scmd;  % residual in kg/s
 
     %% Pressure residual: EKF estimate vs physics-implied pressure
     %  Invert Weymouth to find what pressure each edge "should" have
     %  given the observed PLC flow. For each edge e:
-    %    q_plc(e)^2 = K_e * (P_up^2 - P_dn^2)
-    %    P_up^2 - P_dn^2 = q_plc(e)^2 / K_e  (= Δ(P^2))
+    %    q_plc_scmd(e)^2 = K_e * (P_up^2 - P_dn^2)
+    %    P_up^2 - P_dn^2 = q_plc_scmd(e)^2 / K_e  (= Δ(P^2))
     %  This gives a constraint on the pressure difference per edge.
     %  The nodal pressure residual is the EKF estimate minus the value
     %  implied by the least-squares solution to all edge constraints.
     %
     %  Least-squares inversion: min ||p - p_implied||^2
-    %    subject to: B^T * p_abs_implied^2 = q_plc^2 / K_e
+    %    subject to: B^T * p_abs_implied^2 = q_plc_scmd^2 / K_e
     %  This is a linear system in p_abs^2. Solve via pseudoinverse.
     %  For numerical stability, clamp the right-hand side.
 
-    rhs = (q_plc.^2) ./ max(1e-6, K_e);   % Δ(P^2) per edge [kPa^2]
+    rhs = (q_plc_scmd.^2) ./ max(1e-6, K_e);   % Δ(P^2) per edge [kPa^2]
 
     % Pseudoinverse solution for p_abs_implied^2
     p2_implied = max(0, pinv(full(params.B')) * rhs);   % nN×1 [kPa^2]
