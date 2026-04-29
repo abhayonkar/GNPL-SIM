@@ -16,10 +16,12 @@ function cfg = simConfig()
 %   >> assert(cfg.sto_p_inject == 24.5)
 %   >> assert(cfg.cusum_slack  == 2.5)
 
+    arch = loadCanonicalArchitecture();
+
     % ================================================================
     % NETWORK TOPOLOGY
     % ================================================================
-    cfg.n_nodes = 20;
+    cfg.n_nodes = numel(arch.runtime_topology.node_names);
     cfg.n_pipes = 22;   % 20 base + E21 + E22 resilience edges
 
     % Node type labels — ordered to match nodeNames (S1,J1,CS1,J2,...,D6)
@@ -94,11 +96,11 @@ function cfg = simConfig()
     % ================================================================
     % NODE AND EDGE NAMES (20-node network topology)  ← ADD THIS SECTION
     % ================================================================
-    cfg.nodeNames = ["S1","J1","CS1","J2","J3","J4","CS2","J5","J6","PRS1", ...
-                     "J7","STO","PRS2","S2","D1","D2","D3","D4","D5","D6"];
-    
-    cfg.edgeNames = ["E1","E2","E3","E4","E5","E6","E7","E8","E9","E10", ...
-                     "E11","E12","E13","E14","E15","E16","E17","E18","E19","E20"];
+    cfg.nodeNames = string(arch.runtime_topology.node_names);
+    cfg.edgeNames = string({arch.runtime_topology.active_edges.name});
+    cfg.plannedEdgeNames = string({arch.runtime_topology.planned_edges.name});
+    cfg.boundaryEdgeNames = string(arch.runtime_topology.boundary_edges_for_split);
+    cfg.canonical_schema_version = string(arch.schema_version);
 
     % ================================================================
     % GAS PROPERTIES  (ONGC/GAIL supply, IS 4693)

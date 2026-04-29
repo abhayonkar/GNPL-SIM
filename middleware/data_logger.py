@@ -29,48 +29,11 @@ import argparse
 import csv
 import os
 import signal
-import struct
 import sys
 import time
 from datetime import datetime
 
-# =========================================================================
-# Register map — matches PLC_PRG exactly
-# =========================================================================
-NODE_NAMES = ['S1','J1','CS1','J2','J3','J4','CS2','J5','J6','PRS1',
-              'J7','STO','PRS2','S2','D1','D2','D3','D4','D5','D6']
-EDGE_NAMES = ['E1','E2','E3','E4','E5','E6','E7','E8','E9','E10',
-              'E11','E12','E13','E14','E15','E16','E17','E18','E19','E20']
-
-# (column_name, modbus_addr_0based, scale, unit)
-SENSOR_MAP = [
-    *[(f'p_{n}_bar',    i,    100,  'bar')  for i, n in enumerate(NODE_NAMES)],
-    *[(f'q_{e}_kgs',    20+i, 100,  'kg/s') for i, e in enumerate(EDGE_NAMES)],
-    *[(f'T_{n}_K',      40+i, 10,   'K')    for i, n in enumerate(NODE_NAMES)],
-    ('demand_scalar',   60,   1000, ''),
-]  # 61 registers, addr 0-60
-
-ACTUATOR_MAP = [
-    ('cs1_ratio_cmd',   100,  1000, ''),
-    ('cs2_ratio_cmd',   101,  1000, ''),
-    ('valve_E8_cmd',    102,  1000, 'bool'),
-    ('valve_E14_cmd',   103,  1000, 'bool'),
-    ('valve_E15_cmd',   104,  1000, 'bool'),
-    ('prs1_setpoint_bar', 105, 100, 'bar'),
-    ('prs2_setpoint_bar', 106, 100, 'bar'),
-    ('cs1_power_kW',    107,  10,   'kW'),
-    ('cs2_power_kW',    108,  10,   'kW'),
-]  # 9 registers, addr 100-108
-
-COIL_MAP = [
-    ('emergency_shutdown',   0),
-    ('cs1_alarm',            1),
-    ('cs2_alarm',            2),
-    ('sto_inject_active',    3),
-    ('sto_withdraw_active',  4),
-    ('prs1_active',          5),
-    ('prs2_active',          6),
-]  # 7 coils, addr 0-6
+from architecture import ACTUATOR_MAP, COIL_MAP, SENSOR_MAP
 
 # Build CSV header
 HEADER = (

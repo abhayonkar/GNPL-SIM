@@ -1,0 +1,92 @@
+{
+  "schema_version": "phase2.v1",
+  "runtime_topology": {
+    "node_names": [
+      "S1", "J1", "CS1", "J2", "J3", "J4", "CS2", "J5", "J6", "PRS1",
+      "J7", "STO", "PRS2", "S2", "D1", "D2", "D3", "D4", "D5", "D6"
+    ],
+    "active_edges": [
+      { "index": 1, "name": "E1", "from": "S1", "to": "J1" },
+      { "index": 2, "name": "E2", "from": "J1", "to": "CS1" },
+      { "index": 3, "name": "E3", "from": "CS1", "to": "J2" },
+      { "index": 4, "name": "E4", "from": "J2", "to": "J3" },
+      { "index": 5, "name": "E5", "from": "J3", "to": "J4" },
+      { "index": 6, "name": "E6", "from": "J4", "to": "CS2" },
+      { "index": 7, "name": "E7", "from": "CS2", "to": "J5" },
+      { "index": 8, "name": "E8", "from": "J5", "to": "J6" },
+      { "index": 9, "name": "E9", "from": "J6", "to": "PRS1" },
+      { "index": 10, "name": "E10", "from": "PRS1", "to": "J7" },
+      { "index": 11, "name": "E11", "from": "J7", "to": "STO" },
+      { "index": 12, "name": "E12", "from": "STO", "to": "PRS2" },
+      { "index": 13, "name": "E13", "from": "PRS2", "to": "S2" },
+      { "index": 14, "name": "E14", "from": "S2", "to": "D1" },
+      { "index": 15, "name": "E15", "from": "D1", "to": "D2" },
+      { "index": 16, "name": "E16", "from": "D2", "to": "D3" },
+      { "index": 17, "name": "E17", "from": "D3", "to": "D4" },
+      { "index": 18, "name": "E18", "from": "D4", "to": "D5" },
+      { "index": 19, "name": "E19", "from": "D5", "to": "D6" },
+      { "index": 20, "name": "E20", "from": "J1", "to": "J7" }
+    ],
+    "planned_edges": [
+      { "index": 21, "name": "E21", "from": "J4", "to": "J7", "kind": "resilience_cross_tie" },
+      { "index": 22, "name": "E22", "from": "J3", "to": "J5", "kind": "resilience_bypass" }
+    ],
+    "valve_edges_runtime": ["E8", "E14", "E15"],
+    "valve_edges_planned": ["E21", "E22"],
+    "boundary_edges_for_split": ["E6", "E7", "E10", "E20"]
+  },
+  "gateway_packet": {
+    "sensor_register_count": 61,
+    "actuator_register_count": 9,
+    "coil_count": 7,
+    "pressure_tags": [
+      "p_S1", "p_J1", "p_CS1", "p_J2", "p_J3", "p_J4", "p_CS2", "p_J5", "p_J6", "p_PRS1",
+      "p_J7", "p_STO", "p_PRS2", "p_S2", "p_D1", "p_D2", "p_D3", "p_D4", "p_D5", "p_D6"
+    ],
+    "flow_tags": [
+      "q_E1", "q_E2", "q_E3", "q_E4", "q_E5", "q_E6", "q_E7", "q_E8", "q_E9", "q_E10",
+      "q_E11", "q_E12", "q_E13", "q_E14", "q_E15", "q_E16", "q_E17", "q_E18", "q_E19", "q_E20"
+    ],
+    "temperature_tags": [
+      "T_S1", "T_J1", "T_CS1", "T_J2", "T_J3", "T_J4", "T_CS2", "T_J5", "T_J6", "T_PRS1",
+      "T_J7", "T_STO", "T_PRS2", "T_S2", "T_D1", "T_D2", "T_D3", "T_D4", "T_D5", "T_D6"
+    ],
+    "actuators": [
+      { "name": "cs1_ratio_cmd", "address": 100, "scale": 1000, "unit": "ratio" },
+      { "name": "cs2_ratio_cmd", "address": 101, "scale": 1000, "unit": "ratio" },
+      { "name": "valve_E8_cmd", "address": 102, "scale": 1000, "unit": "0-1" },
+      { "name": "valve_E14_cmd", "address": 103, "scale": 1000, "unit": "0-1" },
+      { "name": "valve_E15_cmd", "address": 104, "scale": 1000, "unit": "0-1" },
+      { "name": "prs1_setpoint", "address": 105, "scale": 100, "unit": "bar" },
+      { "name": "prs2_setpoint", "address": 106, "scale": 100, "unit": "bar" },
+      { "name": "cs1_power_kW", "address": 107, "scale": 10, "unit": "kW" },
+      { "name": "cs2_power_kW", "address": 108, "scale": 10, "unit": "kW" }
+    ],
+    "coils": [
+      { "name": "emergency_shutdown", "address": 0 },
+      { "name": "cs1_alarm", "address": 1 },
+      { "name": "cs2_alarm", "address": 2 },
+      { "name": "sto_inject_active", "address": 3 },
+      { "name": "sto_withdraw_active", "address": 4 },
+      { "name": "prs1_active", "address": 5 },
+      { "name": "prs2_active", "address": 6 }
+    ]
+  },
+  "plc_split": {
+    "plc_a": {
+      "owned_nodes": ["S1", "J1", "CS1", "J2", "J3", "J4", "J6", "PRS1", "D1", "D2"],
+      "owned_edges": ["E1", "E2", "E3", "E4", "E5", "E8", "E9", "E14", "E15"],
+      "owned_actuators": ["cs1_ratio_cmd", "valve_E8_cmd", "prs1_setpoint", "cs1_power_kW"],
+      "owned_coils": ["cs1_alarm", "prs1_active"],
+      "peer_exports": ["p_J4_bar", "p_D1_bar", "CS1_ratio_cmd", "cs1_alarm", "west_demand_scalar", "HB.PLC_A_counter"]
+    },
+    "plc_b": {
+      "owned_nodes": ["CS2", "J5", "J7", "STO", "PRS2", "S2", "D3", "D4", "D5", "D6"],
+      "owned_edges": ["E6", "E7", "E10", "E11", "E12", "E13", "E16", "E17", "E18", "E19", "E20"],
+      "owned_actuators": ["cs2_ratio_cmd", "valve_E14_cmd", "valve_E15_cmd", "prs2_setpoint", "cs2_power_kW"],
+      "owned_coils": ["cs2_alarm", "sto_inject_active", "sto_withdraw_active", "prs2_active"],
+      "peer_exports": ["p_J5_bar", "p_J7_bar", "STO_inventory", "CS2_ratio_cmd", "cs2_alarm", "HB.PLC_B_counter"]
+    },
+    "shared_coils": ["emergency_shutdown"]
+  }
+}
