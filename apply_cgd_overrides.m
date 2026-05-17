@@ -8,11 +8,11 @@ function cfg = apply_cgd_overrides(cfg)
 %   immediately after simConfig().  Uses isfield guards so it is safe
 %   to call even when simConfig is already fully updated.
 %
-%   Every default here matches the original simConfig.m values.
-%   The ONLY intentional change from simConfig defaults is node_V = 500.
+%   Every default here matches the original simConfig.m values, except the
+%   CGD-specific node volume stays inside a realistic 0.5-5 m^3 range.
 
     % ── Phase 0: Primary stability fix ───────────────────────────────────
-    cfg.node_V = 500.0;   % MUST be 500 — do not soften this
+    cfg.node_V = min(max(cfg.node_V, 0.5), 5.0);
 
     % Acoustic noise (match original simConfig value exactly)
     if ~isfield(cfg, 'p_acoustic_corr'), cfg.p_acoustic_corr = 0.90;  end
@@ -138,4 +138,11 @@ function cfg = apply_cgd_overrides(cfg)
     if ~isfield(cfg, 'ekf_P0'), cfg.ekf_P0 = cfg.ekf_P0_diag; end
     if ~isfield(cfg, 'ekf_Qn'), cfg.ekf_Qn = cfg.ekf_Q_diag;  end
     if ~isfield(cfg, 'ekf_Rk'), cfg.ekf_Rk = cfg.ekf_R_diag;  end
+    if ~isfield(cfg, 'ekf_adaptive_enable'),        cfg.ekf_adaptive_enable = true;  end
+    if ~isfield(cfg, 'ekf_adaptive_lambda'),        cfg.ekf_adaptive_lambda = 0.98;  end
+    if ~isfield(cfg, 'ekf_adaptive_q_floor'),       cfg.ekf_adaptive_q_floor = cfg.ekf_Qn; end
+    if ~isfield(cfg, 'ekf_adaptive_q_cap'),         cfg.ekf_adaptive_q_cap = 2.5e-2; end
+    if ~isfield(cfg, 'shadow_divergence_threshold'),cfg.shadow_divergence_threshold = 0.75; end
+    if ~isfield(cfg, 'decision_alert_threshold'),   cfg.decision_alert_threshold = 0.65; end
+    if ~isfield(cfg, 'decision_critical_threshold'),cfg.decision_critical_threshold = 0.85; end
 end

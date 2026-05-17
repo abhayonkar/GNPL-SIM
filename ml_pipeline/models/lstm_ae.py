@@ -234,7 +234,7 @@ class LSTMAEDetector:
             'hidden_dim':  self.hidden_dim,
             'seq_len':     self.seq_len,
         }, path)
-        print(f"[lstm_ae] Saved → {path}")
+        print(f"[lstm_ae] Saved -> {path}")
 
     @classmethod
     def load(cls, path: str, device=None):

@@ -144,7 +144,7 @@ class HybridIDS:
             f"seq={len(X_seq_normal)}, node={len(X_node_normal)}, "
             f"df={len(df_normal)}. Use n_val = min(n_val_seq, n_val_gnn).")
 
-        print("[hybrid] Computing normalisation references on normal data …")
+        print("[hybrid] Computing normalisation references on normal data ...")
         self._lstm_ref = self.lstm_det.anomaly_score(X_seq_normal)
         self._gnn_ref  = self.gnn_det.anomaly_score(X_node_normal)
         self._phys_ref = physics_anomaly_score(df_normal)
@@ -164,7 +164,7 @@ class HybridIDS:
         S      = np.stack([s_lstm, s_gnn, s_phys], axis=1)
 
         if len(np.unique(y)) < 2:
-            print("[hybrid] Only one class — using equal weights.")
+            print("[hybrid] Only one class - using equal weights.")
             self.mode = 'equal'
             return
 
@@ -186,8 +186,7 @@ class HybridIDS:
             raise ValueError(
                 f"fuse_scores: all score arrays must have same length. "
                 f"lstm={len(s_lstm)}, gnn={len(s_gnn)}, phys={len(s_phys)}. "
-                f"Fix: X_node_test = X_node_full[seq_len-1:] and "
-                f"df_test = df.iloc[seq_len-1:].reset_index(drop=True).")
+                f"Fix: align X_node and df to the same sequence endpoint indices.")
 
         S = np.stack([s_lstm, s_gnn, s_phys], axis=1)
         if self.mode == 'supervised' and self._lr_fusion is not None:

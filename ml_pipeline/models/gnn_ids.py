@@ -96,6 +96,42 @@ def build_pipeline_adj(n_nodes: int = 20,
     return adj / deg
 
 
+def build_dynamic_pipeline_adj(valve_state_row=None,
+                               n_nodes: int = 20,
+                               bidirectional: bool = True) -> torch.Tensor:
+    """
+    Build adjacency with valve-aware edge masking.
+
+    Currently E8, E14, and E15 are controllable. If a corresponding valve
+    state is present and closed (<0.5), the physical edge is removed from
+    the message-passing graph for that snapshot.
+    """
+    adj = torch.zeros(n_nodes, n_nodes)
+    blocked_edges = set()
+
+    if valve_state_row is not None:
+        valve_map = {
+            "valve_E8": 7,
+            "valve_E14": 13,
+            "valve_E15": 14,
+        }
+        for key, edge_idx in valve_map.items():
+            if key in valve_state_row and float(valve_state_row[key]) < 0.5:
+                blocked_edges.add(edge_idx)
+
+    for edge_idx, (i, j) in enumerate(PIPELINE_EDGES):
+        if edge_idx in blocked_edges:
+            continue
+        if i < n_nodes and j < n_nodes:
+            adj[i, j] = 1.0
+            if bidirectional:
+                adj[j, i] = 1.0
+
+    adj += torch.eye(n_nodes)
+    deg = adj.sum(dim=1, keepdim=True).clamp(min=1)
+    return adj / deg
+
+
 def build_comm_adj_from_df(df, n_devices: int = 23) -> torch.Tensor:
     """
     Build a device communication adjacency matrix from network_logger CSV.
@@ -357,7 +393,7 @@ class GraphAnomalyDetector:
             'n_nodes':       self.n_nodes,
             'hidden_dim':    self.hidden_dim,
         }, path)
-        print(f"[gnn] Saved → {path}")
+        print(f"[gnn] Saved -> {path}")
 
     @classmethod
     def load(cls, path: str, device=None):

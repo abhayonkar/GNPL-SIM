@@ -55,8 +55,20 @@ def scenario_group(sid: int) -> str:
 
 def load_scenario_ids(path: str, id_col: str = 'scenario_id') -> np.ndarray:
     """Read unique scenario IDs from a CSV without loading full data."""
-    df = pd.read_csv(path, usecols=[id_col])
-    return np.sort(df[id_col].unique())
+    try:
+        df = pd.read_csv(path, usecols=[id_col], low_memory=False)
+    except IndexError:
+        # Pandas' chunked C parser can fail on very wide mixed-type CSVs when
+        # usecols selects a single column. The Python engine is slower but more
+        # tolerant, and this reads only the scenario_id column.
+        df = pd.read_csv(path, usecols=[id_col], engine='python')
+
+    numeric_ids = pd.to_numeric(df[id_col], errors='coerce')
+    skipped = int(numeric_ids.isna().sum())
+    if skipped:
+        print(f"  WARNING: skipped {skipped:,} rows with non-numeric {id_col}")
+    ids = numeric_ids.dropna().astype(int)
+    return np.sort(ids.unique())
 
 
 def stratified_split(ids: np.ndarray, rng: np.random.Generator,
@@ -88,7 +100,7 @@ def stratified_split(ids: np.ndarray, rng: np.random.Generator,
         result['val'].extend(arr[n_test:n_test + n_val].tolist())
         result['train'].extend(arr[n_test + n_val:].tolist())
 
-        print(f"  Group '{grp_name}': {n} scenarios → "
+        print(f"  Group '{grp_name}': {n} scenarios -> "
               f"train={n - n_test - n_val}  val={n_val}  test={n_test}")
 
     return result
@@ -99,7 +111,7 @@ def write_split_csv(df: pd.DataFrame, ids: list, path: Path,
     """Filter df to matching scenario IDs and write to path."""
     subset = df[df[id_col].isin(set(ids))].reset_index(drop=True)
     subset.to_csv(path, index=False)
-    print(f"  Wrote {len(subset):,} rows → {path}")
+    print(f"  Wrote {len(subset):,} rows -> {path}")
     return len(subset)
 
 
@@ -127,7 +139,7 @@ def main():
     print(f"\n[1] Reading scenario IDs from windows dataset...")
     windows_path = Path(args.windows)
     if not windows_path.exists():
-        print(f"  WARNING: {windows_path} not found — using synthetic IDs 1-382")
+        print(f"  WARNING: {windows_path} not found - using synthetic IDs 1-382")
         all_ids = np.arange(1, 383)
     else:
         all_ids = load_scenario_ids(str(windows_path))
@@ -137,7 +149,7 @@ def main():
     health_path = Path(args.health)
     stress_ids = []
     if health_path.exists():
-        sh = pd.read_csv(str(health_path))
+        sh = pd.read_csv(str(health_path), low_memory=False)
         sh_num = sh[pd.to_numeric(sh['scenario_id'], errors='coerce').notna()].copy()
         sh_num['scenario_id'] = sh_num['scenario_id'].astype(int)
         # Stress = floor hits > 0 OR p_std > 4.0
@@ -174,7 +186,7 @@ def main():
     manifest_path = out / 'split_manifest.json'
     with open(manifest_path, 'w') as f:
         json.dump(manifest, f, indent=2)
-    print(f"\n  Manifest → {manifest_path}")
+    print(f"\n  Manifest -> {manifest_path}")
 
     if args.manifest_only:
         print("\nManifest-only mode. Done.")
@@ -185,7 +197,7 @@ def main():
 
     # Load windows dataset
     print("  Loading attack_windows...")
-    df_w = pd.read_csv(args.windows)
+    df_w = pd.read_csv(args.windows, low_memory=False)
     if 'scenario_id' not in df_w.columns:
         print("  ERROR: no 'scenario_id' column in windows dataset")
         return
@@ -206,13 +218,13 @@ def main():
     baseline_path = Path(args.baseline)
     if baseline_path.exists():
         print("\n  Loading baseline (normal-only)...")
-        df_b = pd.read_csv(str(baseline_path))
+        df_b = pd.read_csv(str(baseline_path), low_memory=False).copy()
         if 'scenario_id' not in df_b.columns:
             df_b['scenario_id'] = -1   # no scenario structure
         df_b['dataset_src'] = 'baseline'
         out_path = out / 'baseline_normal.csv'
         df_b.to_csv(out_path, index=False)
-        print(f"  Baseline: {len(df_b):,} rows → {out_path}")
+        print(f"  Baseline: {len(df_b):,} rows -> {out_path}")
     else:
         print(f"  WARNING: baseline not found at {baseline_path}")
 
@@ -220,11 +232,11 @@ def main():
     cont_path = Path(args.continuous)
     if cont_path.exists():
         print("\n  Loading 48h continuous (held-out test)...")
-        df_48h = pd.read_csv(str(cont_path))
+        df_48h = pd.read_csv(str(cont_path), low_memory=False).copy()
         df_48h['dataset_src'] = '48h_continuous'
         out_path = out / 'test_48h_continuous.csv'
         df_48h.to_csv(out_path, index=False)
-        print(f"  48h: {len(df_48h):,} rows → {out_path}")
+        print(f"  48h: {len(df_48h):,} rows -> {out_path}")
 
         # Update manifest with 48h info
         manifest['splits']['test_48h'] = ['all_172800_rows']
@@ -245,7 +257,7 @@ def main():
             n_scen = len(split[split_name])
             pct_attack = '?'
             try:
-                df_tmp = pd.read_csv(str(csv), usecols=['label'])
+                df_tmp = pd.read_csv(str(csv), usecols=['label'], low_memory=False)
                 pct_attack = f"{df_tmp['label'].mean()*100:.1f}%"
             except Exception:
                 pass

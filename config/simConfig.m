@@ -249,7 +249,7 @@ function cfg = simConfig()
     % ================================================================
     % NODE AND PIPE PROPERTIES
     % ================================================================
-    cfg.node_V        = 100.0;          % lumped nodal volume [m³]
+    cfg.node_V        = 3.0;            % lumped nodal volume [m³] — realistic CGD junction scale
     cfg.pipe_rough    = 4.6e-5;         % absolute pipe roughness [m]  (IS 3589/API 5L steel)
     cfg.pipe_L_vec    = cfg.pipe_L(1:cfg.n_nodes);   % 20-edge alias used by some modules
     cfg.pipe_D_vec    = cfg.pipe_D(1:cfg.n_nodes);   % 20-edge alias used by some modules
@@ -509,6 +509,17 @@ function cfg = simConfig()
     cfg.historian_deadband_q      = 10.0;    % [SCMD]  flow deadband
     cfg.historian_deadband_T      = 0.5;     % [K]     temperature deadband
     cfg.historian_max_interval_s  = 300.0;   % [s]     heartbeat interval
+
+    % ================================================================
+    % ADAPTIVE DIGITAL TWIN / SHADOW STATE
+    % ================================================================
+    cfg.ekf_adaptive_enable         = true;
+    cfg.ekf_adaptive_lambda         = 0.98;
+    cfg.ekf_adaptive_q_floor        = cfg.ekf_Qn;
+    cfg.ekf_adaptive_q_cap          = 2.5e-2;
+    cfg.shadow_divergence_threshold = 0.75;   % [bar] node-level divergence alert threshold
+    cfg.decision_alert_threshold    = 0.65;   % fused anomaly score alert threshold
+    cfg.decision_critical_threshold = 0.85;   % critical anomaly score threshold
 
     % ================================================================
     % FAULT INJECTION PARAMETERS  (applyFaultInjection.m)

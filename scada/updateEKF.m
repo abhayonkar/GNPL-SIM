@@ -47,8 +47,8 @@ function ekf = updateEKF(ekf, meas_p, meas_q, true_p, true_q, params, cfg)
     y = [meas_p(:); meas_q(:)];
 
     H = eye(nX);           % direct observation of all states
-    R = ekf.Rk * eye(nX);
-    Q = ekf.Qn * eye(nX);
+    R = getMeasurementCovariance(ekf, nX);
+    Q = getProcessCovariance(ekf, nX);
 
     %% ── Build F matrix ───────────────────────────────────────────────────
     if nargin >= 6 && ~isempty(params) && nargin >= 7 && ~isempty(cfg)
@@ -75,8 +75,14 @@ function ekf = updateEKF(ekf, meas_p, meas_q, true_p, true_q, params, cfg)
 
     %% ── Store state ──────────────────────────────────────────────────────
     ekf.xhat  = xhat_up;
+    ekf.xpred = xhat_pred;
     ekf.xhatP = xhat_up(1:nN);       % pressure estimates
     ekf.xhatQ = xhat_up(nN+1:end);   % flow estimates
+    ekf.shadow_x = xhat_pred;
+    ekf.shadow_pressure = xhat_pred(1:nN);
+    ekf.shadow_flow = xhat_pred(nN+1:end);
+    ekf.shadow_residual = xhat_up - xhat_pred;
+    ekf.shadow_divergence = abs(ekf.shadow_residual(1:nN));
 
     %% ── Residuals (for IDS features and CUSUM) ───────────────────────────
     ekf.residual  = inn;
@@ -93,6 +99,10 @@ function ekf = updateEKF(ekf, meas_p, meas_q, true_p, true_q, params, cfg)
     %  Alarm threshold (p=0.99, df=40): chi²_crit ≈ 63.7
     ekf.chi2_stat = inn' * (S \ inn);
     ekf.chi2_alarm = (ekf.chi2_stat > 63.7);
+
+    if isfield(ekf, 'adaptive_enable') && ekf.adaptive_enable
+        ekf = adaptProcessCovariance(ekf, inn);
+    end
 
     %% ── Divergence guard ─────────────────────────────────────────────────
     if any(~isfinite(ekf.xhat)) || any(diag(ekf.P) < 0)
@@ -159,6 +169,33 @@ function F = buildJacobian(xhat, params, cfg, nN, nE)
 
     F = [F_pp, F_pq; F_qp, F_qq];
 
-    %% Clip F for numerical stability (prevent runaway gains)
-    F = max(-2, min(2, F));
+end
+
+function R = getMeasurementCovariance(ekf, nX)
+    if isfield(ekf, 'R') && isequal(size(ekf.R), [nX, nX])
+        R = ekf.R;
+    elseif isscalar(ekf.Rk)
+        R = ekf.Rk * eye(nX);
+    else
+        R = ekf.Rk;
+    end
+end
+
+function Q = getProcessCovariance(ekf, nX)
+    if isfield(ekf, 'Q') && isequal(size(ekf.Q), [nX, nX])
+        Q = ekf.Q;
+    elseif isscalar(ekf.Qn)
+        Q = ekf.Qn * eye(nX);
+    else
+        Q = ekf.Qn;
+    end
+end
+
+function ekf = adaptProcessCovariance(ekf, innovation)
+    innov_var = innovation .^ 2;
+    lambda = ekf.adaptive_lambda;
+    q_diag = diag(ekf.Q);
+    updated_diag = lambda * q_diag + (1 - lambda) * innov_var;
+    updated_diag = min(max(updated_diag, ekf.adaptive_floor), ekf.adaptive_cap);
+    ekf.Q = diag(updated_diag);
 end

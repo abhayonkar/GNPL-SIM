@@ -135,6 +135,18 @@ def build_feature_cols(df):
         + ekf_cols(df)
         + plc_p_cols(df)
         + plc_q_cols(df)
+        + [c for c in [
+            "delta_t_s",
+            "time_sin",
+            "time_cos",
+            "regime_id_num",
+            "source_config_code",
+            "demand_profile_code",
+            "valve_config_code",
+            "cs_mode_code",
+            "replay_pressure_autocorr",
+            "replay_flow_autocorr",
+        ] if c in df.columns]
     )
 
 META_COLS   = ["Timestamp_s","scenario_id","source_config","demand_profile",
@@ -236,10 +248,80 @@ def add_mass_balance_residual(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def add_time_and_regime_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Add timing, diurnal, and coarse operating-regime features."""
+    print("[features] Adding timing and regime features ...")
+
+    if "scenario_id" not in df.columns:
+        df["scenario_id"] = 0
+
+    if "Timestamp_s" in df.columns:
+        ts = pd.to_numeric(df["Timestamp_s"], errors="coerce").fillna(0.0)
+        dt = (
+            df.groupby("scenario_id")["Timestamp_s"]
+            .transform(lambda x: pd.to_numeric(x, errors="coerce").diff().fillna(0.0))
+            .clip(lower=0.0)
+        )
+        hour = (ts / 3600.0) % 24.0
+        df["delta_t_s"] = dt
+        df["time_sin"] = np.sin(2 * np.pi * hour / 24.0)
+        df["time_cos"] = np.cos(2 * np.pi * hour / 24.0)
+    else:
+        df["delta_t_s"] = 0.0
+        df["time_sin"] = 0.0
+        df["time_cos"] = 1.0
+
+    if "regime_id" in df.columns:
+        df["regime_id_num"] = pd.to_numeric(df["regime_id"], errors="coerce").fillna(0).astype(int)
+    else:
+        df["regime_id_num"] = 0
+
+    for col, out_col in [
+        ("source_config", "source_config_code"),
+        ("demand_profile", "demand_profile_code"),
+        ("valve_config", "valve_config_code"),
+        ("cs_mode", "cs_mode_code"),
+    ]:
+        if col in df.columns:
+            df[out_col] = pd.Categorical(df[col]).codes.astype(float)
+        else:
+            df[out_col] = 0.0
+
+    return df
+
+
+def add_replay_autocorr_features(df: pd.DataFrame, lag: int = 120) -> pd.DataFrame:
+    """Add lag-based similarity features to expose replay windows."""
+    print(f"[features] Adding replay autocorrelation features (lag={lag}) ...")
+
+    def _lag_similarity(series: pd.Series) -> pd.Series:
+        shifted = series.shift(lag)
+        return (series - shifted).abs().fillna(0.0)
+
+    p_cols = pressure_cols(df)[: min(5, len(pressure_cols(df)))]
+    q_cols = flow_cols(df)[: min(5, len(flow_cols(df)))]
+
+    if p_cols:
+        sims = [df.groupby("scenario_id")[col].transform(_lag_similarity) for col in p_cols]
+        df["replay_pressure_autocorr"] = 1.0 / (1.0 + pd.concat(sims, axis=1).mean(axis=1))
+    else:
+        df["replay_pressure_autocorr"] = 0.0
+
+    if q_cols:
+        sims = [df.groupby("scenario_id")[col].transform(_lag_similarity) for col in q_cols]
+        df["replay_flow_autocorr"] = 1.0 / (1.0 + pd.concat(sims, axis=1).mean(axis=1))
+    else:
+        df["replay_flow_autocorr"] = 0.0
+
+    return df
+
+
 def engineer_features(df: pd.DataFrame, rolling: bool = True) -> pd.DataFrame:
+    df = add_time_and_regime_features(df)
     if rolling:
         df = add_rolling_features(df)
         df = add_rate_of_change(df)
+    df = add_replay_autocorr_features(df)
     df = add_mass_balance_residual(df)
     return df
 

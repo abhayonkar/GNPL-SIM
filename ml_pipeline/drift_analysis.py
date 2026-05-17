@@ -67,6 +67,21 @@ def load_csv(path: Path, label: str) -> pd.DataFrame:
     return df
 
 
+def numeric_values(series: pd.Series) -> np.ndarray:
+    """Return finite numeric values, coercing numeric-looking strings."""
+    values = pd.to_numeric(series, errors="coerce").dropna().to_numpy(dtype=np.float64)
+    return values[np.isfinite(values)]
+
+
+def numeric_range(df: pd.DataFrame, cols: list[str]) -> tuple[float, float] | None:
+    numeric_df = df[cols].apply(pd.to_numeric, errors="coerce")
+    min_val = numeric_df.min(axis=None, skipna=True)
+    max_val = numeric_df.max(axis=None, skipna=True)
+    if pd.isna(min_val) or pd.isna(max_val):
+        return None
+    return float(min_val), float(max_val)
+
+
 # ── Wasserstein analysis ──────────────────────────────────────────────────────
 
 def compute_drift(train: pd.DataFrame, test: pd.DataFrame,
@@ -81,15 +96,14 @@ def compute_drift(train: pd.DataFrame, test: pd.DataFrame,
         c for c in train.columns
         if c in test.columns
         and classify_feature(c) not in skip_groups
-        and pd.api.types.is_numeric_dtype(train[c])
     ]
 
-    print(f"[drift] Computing W-distance on {len(common_cols)} shared numeric columns …")
+    print(f"[drift] Candidate shared feature columns: {len(common_cols)}")
 
     rows = []
     for col in common_cols:
-        t_vals = train[col].dropna().values.astype(np.float64)
-        s_vals = test[col].dropna().values.astype(np.float64)
+        t_vals = numeric_values(train[col])
+        s_vals = numeric_values(test[col])
         if len(t_vals) < 10 or len(s_vals) < 10:
             continue
         try:
@@ -108,6 +122,7 @@ def compute_drift(train: pd.DataFrame, test: pd.DataFrame,
             "drift_flag": w > 1.0 if not np.isnan(w) else False,
         })
 
+    print(f"[drift] Computed W-distance on {len(rows)} shared numeric columns after coercion.")
     rows.sort(key=lambda r: r["W"] if not np.isnan(r["W"]) else -1, reverse=True)
     return rows
 
@@ -153,15 +168,14 @@ def missing_feature_classes(train: pd.DataFrame, test: pd.DataFrame) -> list[str
     if p_cols_train and p_cols_test:
         common_p = list(set(p_cols_train) & set(p_cols_test))
         if common_p:
-            p_train_range = (
-                train[common_p].min().min(),
-                train[common_p].max().max(),
-            )
-            p_test_range = (
-                test[common_p].min().min(),
-                test[common_p].max().max(),
-            )
-            if p_test_range[0] < p_train_range[0] * 0.9 or p_test_range[1] > p_train_range[1] * 1.1:
+            p_train_range = numeric_range(train, common_p)
+            p_test_range = numeric_range(test, common_p)
+            if p_train_range is None or p_test_range is None:
+                findings.append(
+                    "**Pressure operating envelope**: pressure columns are present, "
+                    "but no comparable numeric values were available after coercion."
+                )
+            elif p_test_range[0] < p_train_range[0] * 0.9 or p_test_range[1] > p_train_range[1] * 1.1:
                 findings.append(
                     f"**Pressure operating envelope**: train p ∈ [{p_train_range[0]:.2f}, {p_train_range[1]:.2f}] bar, "
                     f"test p ∈ [{p_test_range[0]:.2f}, {p_test_range[1]:.2f}] bar. "
@@ -312,7 +326,7 @@ def write_report(out_path: Path, rows: list[dict], group_sum: dict,
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text("\n".join(lines), encoding="utf-8")
-    print(f"[drift] Report written → {out_path}")
+    print(f"[drift] Report written -> {out_path}")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -353,7 +367,7 @@ def main():
     n_drift = sum(1 for r in rows if r["drift_flag"])
     print(f"\n[drift] Features with W > 1.0: {n_drift}")
     for r in rows[:20]:
-        flag = " ← DRIFT" if r["drift_flag"] else ""
+        flag = " <- DRIFT" if r["drift_flag"] else ""
         print(f"  {r['feature']:45s}  W={r['W']:.3f}{flag}")
 
     write_report(out_path, rows, group_sum, missing, train_path, test_path)

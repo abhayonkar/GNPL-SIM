@@ -75,14 +75,63 @@ LABEL_COLS = ["label","ATTACK_ID","FAULT_ID","MITRE_CODE",
               "attack_start","recovery_start","recovery_phase"]
 
 
+def add_temporal_context_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Inject timing, regime, and replay-oriented features before scaling."""
+    extra = {}
+    if "scenario_id" not in df.columns:
+        df = df.assign(scenario_id=0)
+
+    if "Timestamp_s" in df.columns:
+        ts = pd.to_numeric(df["Timestamp_s"], errors="coerce").fillna(0.0)
+        dt = (
+            df.groupby("scenario_id")["Timestamp_s"]
+            .transform(lambda x: pd.to_numeric(x, errors="coerce").diff().fillna(0.0))
+            .clip(lower=0.0)
+        )
+        hour = (ts / 3600.0) % 24.0
+        extra["delta_t_s"] = dt
+        extra["time_sin"] = np.sin(2 * np.pi * hour / 24.0)
+        extra["time_cos"] = np.cos(2 * np.pi * hour / 24.0)
+    else:
+        extra["delta_t_s"] = 0.0
+        extra["time_sin"] = 0.0
+        extra["time_cos"] = 1.0
+
+    if "regime_id" in df.columns:
+        extra["regime_id_num"] = pd.to_numeric(df["regime_id"], errors="coerce").fillna(0)
+    else:
+        extra["regime_id_num"] = 0.0
+
+    p_cols = [c for c in df.columns if c.startswith("p_") and c.endswith("_bar")][:5]
+    q_cols = [c for c in df.columns if c.startswith("q_") and c.endswith("_kgs")][:5]
+
+    def _lag_similarity(series: pd.Series, lag: int = 120) -> pd.Series:
+        shifted = series.shift(lag)
+        return (series - shifted).abs().fillna(0.0)
+
+    if p_cols:
+        sims = [df.groupby("scenario_id")[col].transform(_lag_similarity) for col in p_cols]
+        extra["replay_pressure_autocorr"] = 1.0 / (1.0 + pd.concat(sims, axis=1).mean(axis=1))
+    else:
+        extra["replay_pressure_autocorr"] = 0.0
+
+    if q_cols:
+        sims = [df.groupby("scenario_id")[col].transform(_lag_similarity) for col in q_cols]
+        extra["replay_flow_autocorr"] = 1.0 / (1.0 + pd.concat(sims, axis=1).mean(axis=1))
+    else:
+        extra["replay_flow_autocorr"] = 0.0
+
+    return pd.concat([df.copy(), pd.DataFrame(extra, index=df.index)], axis=1)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Data loading
 # ─────────────────────────────────────────────────────────────────────────────
 
 def load_and_prepare(data_path: Path, nrows=None):
-    print(f"\n[data] Loading → {data_path}")
+    print(f"\n[data] Loading -> {data_path}")
     df = pd.read_csv(data_path, nrows=nrows, low_memory=False)
-    print(f"       {len(df):,} rows × {len(df.columns)} cols")
+    print(f"       {len(df):,} rows x {len(df.columns)} cols")
 
     skip = set(META_COLS + LABEL_COLS)
     for col in df.columns:
@@ -91,16 +140,50 @@ def load_and_prepare(data_path: Path, nrows=None):
 
     for col, default in [("ATTACK_ID", 0), ("label", 0)]:
         if col not in df.columns:
-            df[col] = default
+            df = pd.concat(
+                [df, pd.DataFrame({col: default}, index=df.index)],
+                axis=1,
+            )
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(default).astype(int)
 
     if "scenario_id" not in df.columns:
-        df["scenario_id"] = 0
+        df = pd.concat(
+            [df, pd.DataFrame({"scenario_id": 0}, index=df.index)],
+            axis=1,
+        )
 
+    df = add_temporal_context_features(df)
     feat_cols = [c for c in df.columns if c not in skip and df[c].dtype != object]
     df[feat_cols] = df[feat_cols].ffill().bfill().fillna(0)
 
     return df, feat_cols
+
+
+def align_feature_columns(df_train: pd.DataFrame,
+                          df_test: pd.DataFrame,
+                          feat_cols: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Ensure external eval data has the same numeric feature contract."""
+    missing_in_test = [c for c in feat_cols if c not in df_test.columns]
+    if missing_in_test:
+        print(f"[features] Adding {len(missing_in_test)} missing eval columns as 0.0")
+        df_test = pd.concat(
+            [df_test, pd.DataFrame(0.0, index=df_test.index, columns=missing_in_test)],
+            axis=1,
+        )
+
+    missing_in_train = [c for c in feat_cols if c not in df_train.columns]
+    if missing_in_train:
+        print(f"[features] Adding {len(missing_in_train)} missing train columns as 0.0")
+        df_train = pd.concat(
+            [df_train, pd.DataFrame(0.0, index=df_train.index, columns=missing_in_train)],
+            axis=1,
+        )
+
+    for col in feat_cols:
+        df_train[col] = pd.to_numeric(df_train[col], errors="coerce").fillna(0.0)
+        df_test[col] = pd.to_numeric(df_test[col], errors="coerce").fillna(0.0)
+
+    return df_train, df_test
 
 
 def scenario_split(df, test_frac=0.2, seed=42):
@@ -124,6 +207,11 @@ def time_split(df, test_frac=0.2):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def evaluate(y_true, y_pred, scores, model_name: str) -> dict:
+    if not (len(y_true) == len(y_pred) == len(scores)):
+        raise ValueError(
+            f"{model_name}: y_true, y_pred, and scores must have the same length "
+            f"(got {len(y_true)}, {len(y_pred)}, {len(scores)})."
+        )
     n_cls = len(np.unique(y_true))
     auc   = roc_auc_score(y_true, scores) if n_cls > 1 else float('nan')
     f1    = f1_score(y_true, y_pred, zero_division=0)
@@ -180,7 +268,10 @@ def detection_delay(df_test, y_pred, model_name: str) -> pd.DataFrame:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data",          default=str(DEFAULT_DATA))
+    parser.add_argument("--val-data",      default=None,
+                        help="Optional external evaluation CSV. If set, train on --data and evaluate on this file.")
     parser.add_argument("--nrows",         type=int,   default=None)
+    parser.add_argument("--val-nrows",     type=int,   default=None)
     parser.add_argument("--seq-len",       type=int,   default=30)
     parser.add_argument("--epochs",        type=int,   default=20)
     parser.add_argument("--no-gnn",        action="store_true")
@@ -190,7 +281,7 @@ def main():
                         help="Stride for train sequences (default 5). "
                              "Larger = fewer sequences = less RAM.")
     parser.add_argument("--seq-step-test", type=int,   default=None,
-                        help="Stride for test sequences (default 3× seq-step).")
+                        help="Stride for test sequences (default 3x seq-step).")
     parser.add_argument("--max-seq-train", type=int,   default=50_000,
                         help="Max training sequences (default 50000, ~0.7 GB).")
     parser.add_argument("--max-seq-test",  type=int,   default=20_000,
@@ -211,12 +302,21 @@ def main():
 
     # ── Load + split ──────────────────────────────────────────────────────
     df, feat_cols = load_and_prepare(Path(args.data), args.nrows)
-    n_scenarios = df["scenario_id"].nunique()
-    if n_scenarios <= 1:
-        print(f"[split] Single scenario detected → using chronological 80/20 time split")
-        df_train, df_test = time_split(df)
+    if args.val_data:
+        print(f"\n[data] External eval -> {args.val_data}")
+        df_train = df.copy()
+        df_test, eval_feat_cols = load_and_prepare(Path(args.val_data), args.val_nrows)
+        df_train, df_test = align_feature_columns(df_train, df_test, feat_cols)
+        ignored_eval = sorted(set(eval_feat_cols) - set(feat_cols))
+        if ignored_eval:
+            print(f"[features] Ignoring {len(ignored_eval)} eval-only feature columns not present in train")
     else:
-        df_train, df_test = scenario_split(df)
+        n_scenarios = df["scenario_id"].nunique()
+        if n_scenarios <= 1:
+            print(f"[split] Single scenario detected -> using chronological 80/20 time split")
+            df_train, df_test = time_split(df)
+        else:
+            df_train, df_test = scenario_split(df)
 
     print(f"\n[split] Train: {len(df_train):,} rows ({df_train['scenario_id'].nunique()} scenarios)")
     print(f"[split] Test : {len(df_test):,} rows ({df_test['scenario_id'].nunique()} scenarios)")
@@ -238,7 +338,7 @@ def main():
 
     # ── TIER 1: LSTM-AE ───────────────────────────────────────────────────
     print("\n" + "="*60)
-    print("  TIER 1 — LSTM Autoencoder (Temporal)")
+    print("  TIER 1 - LSTM Autoencoder (Temporal)")
     print("="*60)
 
     input_dim   = X_train_flat.shape[1]
@@ -254,7 +354,7 @@ def main():
     )
     print(f"[lstm] Train sequences: {len(X_seq_normal):,}  "
           f"shape={X_seq_normal.shape}  "
-          f"RAM≈{X_seq_normal.nbytes/1e9:.2f} GB")
+          f"RAM~{X_seq_normal.nbytes/1e9:.2f} GB")
 
     print(f"[lstm] Building test sequences  "
           f"(step={seq_step_test}, cap={args.max_seq_test:,}) ...")
@@ -265,7 +365,7 @@ def main():
     )
     print(f"[lstm] Test sequences : {len(X_seq_test):,}  "
           f"shape={X_seq_test.shape}  "
-          f"RAM≈{X_seq_test.nbytes/1e9:.2f} GB")
+          f"RAM~{X_seq_test.nbytes/1e9:.2f} GB")
 
     # FIX 3 (df_test_seq alignment): when max_sequences caps the test set,
     # df_test_seq must index exactly the rows at each capped window's endpoint.
@@ -291,7 +391,7 @@ def main():
     # ── TIER 2: GNN ───────────────────────────────────────────────────────
     if not args.no_gnn:
         print("\n" + "="*60)
-        print("  TIER 2 — Graph Deviation Network (Topology)")
+        print("  TIER 2 - Graph Deviation Network (Topology)")
         print("="*60)
 
         adj = build_pipeline_adj(n_nodes=20)
@@ -300,14 +400,24 @@ def main():
         X_node_train_full = build_node_features(df_train, DEFAULT_NODE_FEATURE_MAP)
         X_node_test_full  = build_node_features(df_test,  DEFAULT_NODE_FEATURE_MAP)
 
-        # FIX 1: Align X_node_test to sequence indexing
-        X_node_test = X_node_test_full[seq_len - 1:]
+        # Align graph snapshots to the same capped sequence endpoints used by
+        # X_seq_test/y_seq_test/df_test_seq. A simple seq_len-1 slice only works
+        # for stride=1 and caused row-level GNN scores to be compared against
+        # sequence-level labels.
+        test_endpoints = _test_starts + seq_len - 1
+        X_node_test = X_node_test_full[test_endpoints]
 
         # Normalise per node-feature dimension
         node_mean = X_node_train_full[y_train == 0].mean(axis=0, keepdims=True)
         node_std  = X_node_train_full[y_train == 0].std(axis=0, keepdims=True) + 1e-8
         X_node_train_full = (X_node_train_full - node_mean) / node_std
         X_node_test       = (X_node_test - node_mean) / node_std
+
+        if len(X_node_test) != len(y_seq_test):
+            raise ValueError(
+                f"GNN test alignment failed: node={len(X_node_test)}, "
+                f"seq_labels={len(y_seq_test)}"
+            )
 
         X_node_normal = X_node_train_full[y_train == 0]
 
@@ -347,7 +457,7 @@ def main():
     # ── TIER 3: Hybrid Fusion ─────────────────────────────────────────────
     if not args.no_gnn:
         print("\n" + "="*60)
-        print("  TIER 3 — Hybrid Fusion (LSTM + GNN + Physics)")
+        print("  TIER 3 - Hybrid Fusion (LSTM + GNN + Physics)")
         print("="*60)
 
         ids = HybridIDS(lstm_det, gnn_det, mode='equal')
@@ -366,9 +476,11 @@ def main():
                 step=seq_len,
                 max_sequences=50_000,
             )
-            # Align node features: take every seq_len-th row
-            X_node_tr_all = X_node_train_full[::seq_len][:len(y_seq_tr_all)]
-            df_tr_sampled = (df_train.iloc[::seq_len]
+            train_starts = _compute_starts(
+                len(X_train_flat), seq_len, seq_len, 50_000)
+            train_endpoints = train_starts + seq_len - 1
+            X_node_tr_all = X_node_train_full[train_endpoints][:len(y_seq_tr_all)]
+            df_tr_sampled = (df_train.iloc[train_endpoints]
                              .iloc[:len(y_seq_tr_all)]
                              .reset_index(drop=True))
             ids.fit_weights(X_seq_tr_all, X_node_tr_all, df_tr_sampled, y_seq_tr_all)
@@ -399,12 +511,14 @@ def main():
     results_df.to_csv(out_dir / "results_comparison.csv", index=False)
     print(f"\n[results]\n{results_df.to_string(index=False)}")
 
-    if all_per_atk:
-        pd.concat(all_per_atk, ignore_index=True).to_csv(
+    per_atk_frames = [df for df in all_per_atk if not df.empty]
+    if per_atk_frames:
+        pd.concat(per_atk_frames, ignore_index=True).to_csv(
             out_dir / "per_attack_f1.csv", index=False)
 
-    if all_delay:
-        delay_df = pd.concat(all_delay, ignore_index=True)
+    delay_frames = [df for df in all_delay if not df.empty]
+    if delay_frames:
+        delay_df = pd.concat(delay_frames, ignore_index=True)
         delay_df.to_csv(out_dir / "detection_delay.csv", index=False)
         print(f"\n[delay] Mean detection delay (steps @ 1 Hz):")
         print(delay_df.groupby("model")["delay_steps"].mean().round(1).to_string())
@@ -415,7 +529,7 @@ def main():
         json.dump(paper_table, f, indent=2)
 
     print(f"\n{'='*60}")
-    print(f"  Training complete.  Outputs → {out_dir}/")
+    print(f"  Training complete.  Outputs -> {out_dir}/")
     print(f"{'='*60}\n")
 
 

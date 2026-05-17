@@ -64,7 +64,7 @@ function [resid_p, resid_q] = computeWeymouthResiduals(ekf, state, params, cfg)
     D_vec = params.D(1:nE);         % m
     K_e   = A_wey .* (D_vec.^(16/3)) ./ (SG .* Tf .* Z .* L_vec);
 
-    p_abs  = (p_ekf + 1.01325) * 100;         % kPa abs
+    p_abs  = barg_to_kpa_abs(p_ekf);          % kPa abs
     dp_abs = params.B' * p_abs;               % pressure drop per edge [kPa]
     p_sum  = abs(params.B)' * p_abs;          % P_up + P_dn per edge [kPa]
 
@@ -83,7 +83,7 @@ function [resid_p, resid_q] = computeWeymouthResiduals(ekf, state, params, cfg)
 
     %% Flow residual: PLC reading vs Weymouth prediction
     q_plc      = state.q(1:nE);           % kg/s (PLC bus reading)
-    q_plc_scmd = q_plc * kgs_to_scmd;    % SCMD — same units as q_wey
+    q_plc_scmd = q_plc * kgs_to_scmd;     % SCMD — same units as q_wey
     resid_q    = (q_plc_scmd - q_wey) / kgs_to_scmd;  % residual in kg/s
 
     %% Pressure residual: EKF estimate vs physics-implied pressure
@@ -100,16 +100,24 @@ function [resid_p, resid_q] = computeWeymouthResiduals(ekf, state, params, cfg)
     %  This is a linear system in p_abs^2. Solve via pseudoinverse.
     %  For numerical stability, clamp the right-hand side.
 
-    rhs = (q_plc_scmd.^2) ./ max(1e-6, K_e);   % Δ(P^2) per edge [kPa^2]
+    rhs = sign(q_plc_scmd) .* (q_plc_scmd.^2) ./ max(1e-6, K_e);   % signed Δ(P^2)
 
-    % Pseudoinverse solution for p_abs_implied^2
-    p2_implied = max(0, pinv(full(params.B')) * rhs);   % nN×1 [kPa^2]
+    p_sq_ref = p_abs .^ 2;
+    p2_implied = p_sq_ref + pinv(full(params.B')) * (rhs - params.B' * p_sq_ref);
     p_implied_abs  = sqrt(max(0, p2_implied));           % kPa abs
-    p_implied_barg = max(0, p_implied_abs / 100 - 1.01325);  % barg
+    p_implied_barg = kpa_abs_to_barg(p_implied_abs);     % barg
 
     resid_p = p_ekf - p_implied_barg;   % 20×1 barg
 
     %% Guard against NaN/Inf
     resid_p(~isfinite(resid_p)) = 0;
     resid_q(~isfinite(resid_q)) = 0;
+end
+
+function p_kpa = barg_to_kpa_abs(p_barg)
+    p_kpa = (p_barg + 1.01325) * 100.0;
+end
+
+function p_barg = kpa_abs_to_barg(p_kpa)
+    p_barg = max(0, p_kpa / 100.0 - 1.01325);
 end
