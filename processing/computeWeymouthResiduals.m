@@ -82,8 +82,10 @@ function [resid_p, resid_q] = computeWeymouthResiduals(ekf, state, params, cfg)
     kgs_to_scmd  = 86400 / rho_std_kgm3;                     % SCMD per (kg/s)
 
     %% Flow residual: PLC reading vs Weymouth prediction
-    q_plc      = state.q(1:nE);           % kg/s (PLC bus reading)
-    q_plc_scmd = q_plc * kgs_to_scmd;     % SCMD — same units as q_wey
+    %  state.q is output by computeFlows in SCMD — no conversion needed.
+    %  Previous code multiplied by kgs_to_scmd (~120500x) then divided back,
+    %  but the subtraction happened at wrong scale → residual ≈ 0 always.
+    q_plc_scmd = state.q(1:nE);                        % SCMD (already correct units)
     resid_q    = (q_plc_scmd - q_wey) / kgs_to_scmd;  % residual in kg/s
 
     %% Pressure residual: EKF estimate vs physics-implied pressure

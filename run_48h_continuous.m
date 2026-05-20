@@ -32,6 +32,12 @@
 %    >> run_48h_continuous('attack_density', 'high')  % more attacks
 %    >> run_48h_continuous('resume_from_h', 12.5)     % resume after crash
 %
+%  MULTI-RUN NOTE:
+%    attack_density accepts only: 'none', 'low', 'normal', 'high'.
+%    If manually looping over 48h runs, name that list density_profiles
+%    rather than demand_profiles to avoid confusing attack frequency with
+%    demand operating regimes. Prefer run_48h_sweep() for the paper dataset.
+%
 % =========================================================================
 
 function run_48h_continuous(varargin)
@@ -41,14 +47,21 @@ function run_48h_continuous(varargin)
     addParameter(ap, 'duration_h',      48);
     addParameter(ap, 'gateway',         false);
     addParameter(ap, 'attack_density',  'normal');   % 'none','low','normal','high'
+    addParameter(ap, 'attack_types',    1:10);        % which attack IDs to include
     addParameter(ap, 'fault_enable',    true);
     addParameter(ap, 'jitter_enable',   true);
     addParameter(ap, 'historian_enable', true);
     addParameter(ap, 'resume_from_h',   0);
     addParameter(ap, 'out_dir',         'automated_dataset/continuous_48h');
     addParameter(ap, 'checkpoint_h',    4);   % save state every N hours
+    addParameter(ap, 'seed',            -1);  % -1 = do not seed (use current state)
     parse(ap, varargin{:});
     opt = ap.Results;
+
+    %% ── Seed RNG if requested ─────────────────────────────────────────────
+    if opt.seed >= 0
+        rng(opt.seed);
+    end
 
     addpath('config','network','equipment','scada','control', ...
             'attacks','logging','export','middleware','profiling','processing');
@@ -90,9 +103,9 @@ function run_48h_continuous(varargin)
     fprintf('[init] Operating regimes: %d\n', n_regimes);
 
     %% ── Build attack schedule over full 48h ──────────────────────────────
-    attack_plan = build_continuous_attack_schedule(N, dt, opt.attack_density, cfg);
-    fprintf('[init] Planned attacks: %d  (density=%s)\n', ...
-            attack_plan.n_attacks, opt.attack_density);
+    attack_plan = build_continuous_attack_schedule(N, dt, opt.attack_density, cfg, opt.attack_types);
+    fprintf('[init] Planned attacks: %d  (density=%s  types=%s)\n', ...
+            attack_plan.n_attacks, opt.attack_density, mat2str(opt.attack_types(:)'));
 
     %% ── Initialise all subsystems (ONCE for the entire 48h) ──────────────
     fprintf('[init] Initialising network (state persists for %dh)...\n', opt.duration_h);
@@ -220,6 +233,9 @@ function run_48h_continuous(varargin)
         [state, comp2] = updateCompressor(state, comp2, k, cfg, 2);
         [state, prs1]  = updatePRS(state, prs1, cfg);
         [state, prs2]  = updatePRS(state, prs2, cfg);
+        if aid == 0
+            state.p = applyNormalPressureEnvelope(state.p, cfg);
+        end
 
         [state.Tgas, T_turb] = updateTemperature(params, state.Tgas, state.q, ...
                                                   p_prev, state.p, T_turb, cfg);
@@ -267,13 +283,13 @@ function run_48h_continuous(varargin)
         if aid ~= 2
             [comp1, comp2, prs1, prs2, valve_states, plc] = ...
                 updateControlLogic(comp1, comp2, prs1, prs2, valve_states, ...
-                                   plc, ekf.xhatP, cfg, k, dt);
+                                   plc, ekf.xhatP, cfg, k, dt, aid, fault_label);
         else
             plc = advanceLatencyBuffers(plc);
         end
 
         hist = updateHistorian(hist, state, plc, aid, k, dt, cfg, params);
-        detectIncidents(cfg, params, state, ekf, comp1, comp2, plc, k, dt);
+        detectIncidents(cfg, params, state, ekf, comp1, comp2, plc, k, dt, aid, fault_label);
 
         %% ── Log row (streaming to CSV) ───────────────────────────────────
         if mod(k, log_every) == 0
@@ -446,7 +462,7 @@ end
 %  ATTACK SCHEDULE — random attacks across full 48h
 % =========================================================================
 
-function plan = build_continuous_attack_schedule(N, dt, density, cfg)
+function plan = build_continuous_attack_schedule(N, dt, density, cfg, attack_types)
 % build_continuous_attack_schedule  Place attacks randomly across 48h.
 %
 %  Density controls mean inter-attack gap:
@@ -454,6 +470,16 @@ function plan = build_continuous_attack_schedule(N, dt, density, cfg)
 %    'low'    : ~4 attacks per 24h
 %    'normal' : ~8 attacks per 24h
 %    'high'   : ~15 attacks per 24h
+%
+%  attack_types: vector of attack IDs to draw from (default 1:10)
+%    Restricting this lets run_48h_sweep produce runs dominated by specific
+%    attack classes (physical / sensor / cyber), enabling per-class
+%    cross-regime generalisation analysis in Paper 2.
+
+    if nargin < 5 || isempty(attack_types)
+        attack_types = 1:10;
+    end
+    attack_types = attack_types(:)';   % row vector
 
     T_total = N * dt;
 
@@ -472,8 +498,10 @@ function plan = build_continuous_attack_schedule(N, dt, density, cfg)
 
     if n_attacks == 0, return; end
 
-    % Draw attack IDs uniformly from A1-A10
-    plan.ids = randi(10, 1, n_attacks);
+    % Draw attack IDs uniformly from the allowed attack_types subset.
+    % Using randsample ensures each type is equally likely regardless of
+    % how many types are provided.
+    plan.ids = attack_types(randi(numel(attack_types), 1, n_attacks));
 
     % Place with minimum gap
     min_gap  = 600;    % 10 min between attacks
@@ -641,6 +669,8 @@ function write_metadata(opt, cfg, n_rows, n_regimes, attack_plan, wall_h)
     fprintf(fid, '  "n_regimes": %d,\n', n_regimes);
     fprintf(fid, '  "n_attacks": %d,\n', attack_plan.n_attacks);
     fprintf(fid, '  "attack_density": "%s",\n', opt.attack_density);
+    fprintf(fid, '  "attack_types": %s,\n', mat2str(opt.attack_types(:)'));
+    fprintf(fid, '  "seed": %d,\n', opt.seed);
     fprintf(fid, '  "gateway": %s,\n', lower(string(opt.gateway)));
     fprintf(fid, '  "fault_enable": %s,\n', lower(string(opt.fault_enable)));
     fprintf(fid, '  "wall_time_h": %.2f\n', wall_h);

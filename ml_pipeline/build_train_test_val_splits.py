@@ -22,6 +22,12 @@ Usage:
         --windows    automated_dataset/attack_windows/physics_dataset_windows.csv \\
         --continuous automated_dataset/continuous_48h/physics_dataset_features.csv \\
         --out-dir    ml_outputs/splits
+
+    # Aggregate 48h sweep runs into test_48h_continuous.csv:
+    python build_train_test_val_splits.py --rebuild-48h
+    python build_train_test_val_splits.py --rebuild-48h \\
+        --sweep-dir automated_dataset/continuous_48h \\
+        --out-dir   ml_outputs/splits
 """
 
 import argparse
@@ -30,6 +36,10 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+# Run IDs from run_48h_sweep.m that are clean (no attacks).
+# These contribute FPR data only and are excluded from attack-based metrics.
+_CLEAN_RUN_IDS = {10}
 
 # ── Constants ─────────────────────────────────────────────────────────────
 SEED       = 42
@@ -115,6 +125,105 @@ def write_split_csv(df: pd.DataFrame, ids: list, path: Path,
     return len(subset)
 
 
+def rebuild_48h_test(sweep_dir: Path, out_dir: Path) -> Path:
+    """
+    Aggregate all run_XX/physics_dataset.csv files from the 48h sweep into a
+    single test_48h_continuous.csv.
+
+    Each row gets two extra columns:
+      run_id    — integer 1–10 matching run_48h_sweep.m design matrix
+      clean_run — True only for run_10 (no attacks; FPR reference)
+
+    Run_10 rows are included so that evaluate_cross_regime.py can measure FPR.
+    They are tagged clean_run=True so attack-metric aggregation can exclude them.
+
+    Returns the path to the written CSV.
+    """
+    print("\n" + "=" * 60)
+    print("  Rebuilding 48h continuous test set from sweep runs")
+    print(f"  sweep_dir : {sweep_dir}")
+    print(f"  out_dir   : {out_dir}")
+    print("=" * 60)
+
+    # Load sweep manifest for metadata annotation
+    manifest_path = sweep_dir / 'sweep_manifest.json'
+    run_meta = {}
+    if manifest_path.exists():
+        with open(manifest_path) as f:
+            mdata = json.load(f)
+        for r in mdata.get('runs', []):
+            run_meta[r['run_id']] = r
+        print(f"  Loaded manifest with {len(run_meta)} run configs")
+    else:
+        print(f"  WARNING: sweep_manifest.json not found — metadata columns will be empty")
+
+    run_dirs = sorted(sweep_dir.glob('run_??'))
+    if not run_dirs:
+        print(f"  ERROR: No run_XX directories found in {sweep_dir}")
+        print("         Run run_48h_sweep() in MATLAB first.")
+        return None
+
+    frames = []
+    for run_dir in run_dirs:
+        run_id   = int(run_dir.name.split('_')[1])
+        csv_path = run_dir / 'physics_dataset.csv'
+
+        if not csv_path.exists():
+            print(f"  [run_{run_id:02d}] physics_dataset.csv missing — skipping")
+            continue
+
+        print(f"  [run_{run_id:02d}] Loading {csv_path} ...", end=' ', flush=True)
+        df = pd.read_csv(csv_path, low_memory=False)
+        print(f"{len(df):,} rows")
+
+        df['run_id']    = run_id
+        df['clean_run'] = run_id in _CLEAN_RUN_IDS
+
+        # Annotate from manifest when available
+        meta = run_meta.get(run_id, {})
+        df['run_seed']        = meta.get('seed',        -1)
+        df['run_density']     = meta.get('density',     '')
+        df['run_description'] = meta.get('description', '')
+
+        frames.append(df)
+
+    if not frames:
+        print("  ERROR: No run data loaded.")
+        return None
+
+    combined = pd.concat(frames, ignore_index=True)
+    print(f"\n  Combined: {len(combined):,} rows across {len(frames)} runs")
+
+    # Attack fraction in attack runs only
+    attack_runs = combined[~combined['clean_run']]
+    if len(attack_runs) > 0 and 'label' in attack_runs.columns:
+        atk_frac = pd.to_numeric(attack_runs['label'], errors='coerce').mean()
+        print(f"  Attack fraction (runs 01-09): {atk_frac:.3f}")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / 'test_48h_continuous.csv'
+    combined.to_csv(out_path, index=False)
+    print(f"\n  Written -> {out_path}")
+
+    # Update split manifest if it exists
+    manifest_json = out_dir / 'split_manifest.json'
+    if manifest_json.exists():
+        with open(manifest_json) as f:
+            manifest = json.load(f)
+        manifest['splits']['test_48h'] = {
+            'n_runs': len(frames),
+            'n_rows': len(combined),
+            'run_ids': [int(run_dir.name.split('_')[1]) for run_dir in run_dirs
+                        if (run_dir / 'physics_dataset.csv').exists()],
+            'clean_run_ids': list(_CLEAN_RUN_IDS),
+        }
+        with open(manifest_json, 'w') as f:
+            json.dump(manifest, f, indent=2)
+        print(f"  Updated split manifest -> {manifest_json}")
+
+    return out_path
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--baseline',   default='automated_dataset/ml_dataset_baseline.csv')
@@ -124,7 +233,18 @@ def main():
     ap.add_argument('--out-dir',    default='ml_outputs/splits')
     ap.add_argument('--manifest-only', action='store_true',
                     help='Only write JSON manifests; skip large CSV writes')
+    ap.add_argument('--rebuild-48h', action='store_true',
+                    help='Aggregate all run_XX/physics_dataset.csv from --sweep-dir '
+                         'into test_48h_continuous.csv. Runs independently of normal split.')
+    ap.add_argument('--sweep-dir', default='automated_dataset/continuous_48h',
+                    help='Root of 48h sweep runs for --rebuild-48h (contains run_01/ … run_10/).')
     args = ap.parse_args()
+
+    # ── Early exit: 48h rebuild ───────────────────────────────────────────
+    if args.rebuild_48h:
+        out = Path(args.out_dir)
+        rebuild_48h_test(Path(args.sweep_dir), out)
+        return
 
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -277,6 +397,9 @@ def main():
     print(f"      --val-data {out}/windows_val.csv \\")
     print(f"      --epochs 30 --seq-step 5 --max-seq-train 50000 --max-seq-test 20000 \\")
     print(f"      --out-dir  ml_outputs/attack_windows/temporal_graph/run3")
+    print(f"\n  # After running run_48h_sweep() in MATLAB:")
+    print(f"  python build_train_test_val_splits.py --rebuild-48h")
+    print(f"  python scripts/evaluate_cross_regime.py")
 
 
 if __name__ == '__main__':

@@ -116,8 +116,10 @@ def plc_q_cols(df):
     return [c for c in df.columns if c.startswith("plc_q_")]
 
 def detector_cols(df):
-    candidates = ["cusum_S_upper", "cusum_S_lower", "chi2_stat"]
-    return [c for c in candidates if c in df.columns]
+    # chi2_stat was saturated at ~1.5e9 (unit mismatch fixed in MATLAB updateEKF.m).
+    # cusum_S_upper spiked once then stayed at 0 (depends on chi2 residuals).
+    # Exclude all three from features until data is re-generated after MATLAB fixes.
+    return []
 
 def equipment_cols(df):
     candidates = ["CS1_ratio", "CS1_power_kW", "CS2_ratio", "CS2_power_kW",
@@ -769,10 +771,12 @@ def main():
     results = {}
 
     # ── Isolation Forest (unsupervised) ──────────────────────────────────────
-    normal_mask = y_train == 0
-    contamination = max(0.01, (y_train > 0).mean())
-    iforest = train_isolation_forest(X_train[normal_mask],
-                                     contamination=contamination)
+    # Train on FULL training set so contamination fraction is meaningful.
+    # Previously trained on normal-only data which caused 24% FPR (model
+    # learned to flag top-24% of normal distribution as anomalous).
+    normal_mask   = y_train == 0
+    contamination = min(0.45, max(0.01, (y_train > 0).mean()))
+    iforest = train_isolation_forest(X_train, contamination=contamination)
     res_if  = eval_isolation_forest(iforest, X_test, y_test, out_dir)
     results.update(res_if)
     joblib.dump(iforest, out_dir / "iforest.pkl")

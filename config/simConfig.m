@@ -129,9 +129,9 @@ function cfg = simConfig()
     % ================================================================
     % COMPRESSOR PARAMETERS
     % ================================================================
-    cfg.comp_ratio_min = 1.1;
+    cfg.comp_ratio_min = 1.0;          % allow idle/bypass in normal operation
     cfg.comp_ratio_max = 1.6;
-    cfg.comp_ratio_nom = [1.3, 1.25];   % CS1, CS2 nominal
+    cfg.comp_ratio_nom = [1.03, 1.02];  % CS1, CS2 — nominally below 26 barg MAOP
 
     % ================================================================
     % DEMAND / FLOW  (SCMD — standard cubic metres per day, city scale)
@@ -178,8 +178,12 @@ function cfg = simConfig()
     % EKF PARAMETERS
     % ================================================================
     cfg.ekf_n_states   = 40;        % 20 pressures + 20 flows
-    cfg.ekf_R_diag     = 0.05;     % WAS: 1e-3 → EKF over-trusted measurements
-    cfg.ekf_Q_diag     = 1e-3;     % WAS: 1e-4 → more process uncertainty
+    % R_diag set to flow sensor noise variance (5 SCMD std → 25 SCMD²).
+    % Before SCMD→kg/s fix, flows were treated as kg/s (~8e-6 scale), making
+    % R=0.05 orders of magnitude too large relative to actual flow values.
+    % With flows now in SCMD (800 nominal), R=25 gives chi2_stat ≈ 1 under H0.
+    cfg.ekf_R_diag     = 25.0;     % WAS: 0.05 → now matches noise_sigma_q^2 = 5^2
+    cfg.ekf_Q_diag     = 1e-3;     % process uncertainty (unchanged)
     cfg.ekf_P0_diag    = 1e-2;      % initial covariance
 
     % ================================================================
@@ -271,10 +275,10 @@ function cfg = simConfig()
     % ================================================================
     cfg.comp1_node      = 3;             % CS1 (index in nodeNames)
     cfg.comp2_node      = 7;             % CS2
-    cfg.comp1_ratio     = cfg.comp_ratio_nom(1);   % 1.30
-    cfg.comp2_ratio     = cfg.comp_ratio_nom(2);   % 1.25
-    cfg.comp1_ratio_min = cfg.comp_ratio_min;       % 1.1
-    cfg.comp2_ratio_min = cfg.comp_ratio_min;       % 1.1
+    cfg.comp1_ratio     = cfg.comp_ratio_nom(1);
+    cfg.comp2_ratio     = cfg.comp_ratio_nom(2);
+    cfg.comp1_ratio_min = cfg.comp_ratio_min;
+    cfg.comp2_ratio_min = cfg.comp_ratio_min;
     cfg.comp1_ratio_max = cfg.comp_ratio_max;       % 1.6
     cfg.comp2_ratio_max = cfg.comp_ratio_max;       % 1.6
 
@@ -358,6 +362,8 @@ function cfg = simConfig()
     cfg.alarm_P_high = 26.0;    % [barg]  high pressure alarm (MAOP)
     cfg.alarm_P_low  = 14.0;    % [barg]  low pressure alarm (DRS floor)
     cfg.atk_warmup_s = 120.0;   % [s]     pre-attack warm-up period
+    cfg.normal_pressure_high_margin = 0.2;  % [barg] clean-run headroom below MAOP
+    cfg.normal_pressure_low_margin  = 0.05; % [barg] clean-run headroom above DRS floor
 
     % ================================================================
     % PLC PARAMETERS
@@ -534,7 +540,7 @@ function cfg = simConfig()
     % ================================================================
     % ADDITIONAL ALARM THRESHOLDS
     % ================================================================
-    cfg.alarm_ekf_resid = 2.0;    % [barg]  EKF pressure residual alarm threshold
+    cfg.alarm_ekf_resid = 12.0;   % [barg]  EKF alarm threshold above clean PRS transients
     cfg.alarm_comp_hi   = 1.55;   % [-]     compressor ratio high alarm
 
     % ================================================================

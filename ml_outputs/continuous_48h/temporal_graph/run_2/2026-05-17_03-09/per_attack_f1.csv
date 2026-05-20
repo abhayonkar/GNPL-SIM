@@ -1,4 +1,0 @@
-attack_id,attack_name,model,f1,n_samples
-0,Normal,LSTM-AE,0.0,11519
-0,Normal,GNN,0.0,11519
-0,Normal,Hybrid-IDS,0.0,11519

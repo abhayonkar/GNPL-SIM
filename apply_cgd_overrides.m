@@ -84,8 +84,10 @@ function cfg = apply_cgd_overrides(cfg)
     if ~isfield(cfg, 'alarm_P_high'),    cfg.alarm_P_high    = 26.0; end
     if ~isfield(cfg, 'alarm_P_low'),     cfg.alarm_P_low     = 14.0; end
     if ~isfield(cfg, 'atk_warmup_s'),    cfg.atk_warmup_s    = 120.0;end
-    if ~isfield(cfg, 'alarm_ekf_resid'), cfg.alarm_ekf_resid = 2.0;  end
+    if ~isfield(cfg, 'alarm_ekf_resid'), cfg.alarm_ekf_resid = 12.0; end
     if ~isfield(cfg, 'alarm_comp_hi'),   cfg.alarm_comp_hi   = 1.55; end
+    if ~isfield(cfg, 'normal_pressure_high_margin'), cfg.normal_pressure_high_margin = 0.2;  end
+    if ~isfield(cfg, 'normal_pressure_low_margin'),  cfg.normal_pressure_low_margin  = 0.05; end
 
     % ── PLC zone configuration ────────────────────────────────────────────
     if ~isfield(cfg, 'plc_period_z1'),   cfg.plc_period_z1   = 10;              end

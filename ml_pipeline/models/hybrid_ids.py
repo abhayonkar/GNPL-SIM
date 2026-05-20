@@ -47,28 +47,43 @@ from .gnn_ids import GraphAnomalyDetector, NODE_NAMES
 def physics_anomaly_score(df) -> np.ndarray:
     """
     Compute a scalar physics anomaly score per row from the flat DataFrame.
-    Uses EKF residuals and Kirchhoff imbalance — both in physics_dataset.csv
-    without any additional computation.
+    Uses EKF residuals and Kirchhoff imbalance.
+
+    chi2_stat and cusum_S_upper are clipped robustly at their 99th percentile
+    before contributing to the score.  In datasets generated before the MATLAB
+    unit-mismatch fix, chi2_stat sat at ~1.5e9 (constant, no variance) and
+    cusum_S_upper had a single spike then zeroed out — both would swamp the
+    EKF and Kirchhoff signals if used raw.
 
     Returns
     -------
     scores : np.ndarray shape (N,), dtype float32
     """
-    scores = np.zeros(len(df))
+    scores = np.zeros(len(df), dtype=np.float64)
 
     ekf_cols = [c for c in df.columns if c.startswith('ekf_resid_')]
     if ekf_cols:
-        ekf_vals  = df[ekf_cols].fillna(0).values
-        scores   += np.linalg.norm(ekf_vals, axis=1)
+        ekf_vals = df[ekf_cols].fillna(0).values
+        scores  += np.linalg.norm(ekf_vals, axis=1)
 
     if 'kirchhoff_imbalance' in df.columns:
         scores += df['kirchhoff_imbalance'].fillna(0).abs().values
 
     if 'cusum_S_upper' in df.columns:
-        scores += df['cusum_S_upper'].fillna(0).values * 0.1
+        cusum_vals = df['cusum_S_upper'].fillna(0).values.astype(np.float64)
+        p99 = float(np.percentile(cusum_vals, 99))
+        # If p99 is near zero the column has no useful variance — skip it.
+        if p99 > 1e-8:
+            scores += np.clip(cusum_vals, 0.0, p99) * 0.1
 
     if 'chi2_stat' in df.columns:
-        scores += df['chi2_stat'].fillna(0).values * 0.05
+        chi2_vals = df['chi2_stat'].fillna(0).values.astype(np.float64)
+        pos_mask  = chi2_vals > 0
+        if pos_mask.any():
+            p99 = float(np.percentile(chi2_vals[pos_mask], 99))
+            # chi2_stat saturated at ~1.5e9 in pre-fix data → p99 >> 1e6 → skip
+            if p99 < 1e6:
+                scores += np.clip(chi2_vals, 0.0, p99) * 0.05
 
     return scores.astype(np.float32)
 
@@ -168,12 +183,22 @@ class HybridIDS:
             self.mode = 'equal'
             return
 
-        self.mode       = 'supervised'
         self._lr_fusion = LogisticRegression(class_weight='balanced', C=1.0)
         self._lr_fusion.fit(S, y)
-        print(f"[hybrid] LR weights: LSTM={self._lr_fusion.coef_[0][0]:.3f}  "
-              f"GNN={self._lr_fusion.coef_[0][1]:.3f}  "
-              f"Phys={self._lr_fusion.coef_[0][2]:.3f}")
+        w = self._lr_fusion.coef_[0]
+        print(f"[hybrid] LR weights: LSTM={w[0]:.3f}  GNN={w[1]:.3f}  Phys={w[2]:.3f}")
+
+        # Guard: if any weight is negative, the signal is anti-correlated after
+        # normalisation (usually caused by scale mismatch in physics score before
+        # the chi2 clip fix).  Fall back to equal-weight fusion in that case.
+        if np.any(w < 0):
+            print("[hybrid] WARNING: negative LR weights detected — falling back to "
+                  "equal-weight fusion. Re-run after physics data regeneration.")
+            self._lr_fusion = None
+            self.mode = 'equal'
+            return
+
+        self.mode = 'supervised'
 
     def fuse_scores(self, X_seq: np.ndarray,
                     X_node: np.ndarray, df) -> np.ndarray:

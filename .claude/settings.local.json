@@ -5,7 +5,11 @@
       "Bash(ls \"c:\\\\Users\\\\Abhay.DESKTOP-HP65TET\\\\Documents\\\\Sim\\\\New docs\"\" 2>/dev/null && ls \"c:UsersAbhay.DESKTOP-HP65TETDocumentsSim.kiro\"\")",
       "Bash(ls -1 /c/Users/Abhay.DESKTOP-HP65TET/Documents/Sim/*.m)",
       "Bash(ls -1d /c/Users/Abhay.DESKTOP-HP65TET/Documents/Sim/*/)",
-      "Bash(find /c/Users/Abhay.DESKTOP-HP65TET/Documents/Sim -maxdepth 1 -type f -name *.m -o -name *.txt -o -name *.py)"
+      "Bash(find /c/Users/Abhay.DESKTOP-HP65TET/Documents/Sim -maxdepth 1 -type f -name *.m -o -name *.txt -o -name *.py)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Abhay.DESKTOP-HP65TET\\\\Documents\\\\Sim\" -Recurse -Force)",
+      "Bash(Select-Object -Property FullName, PSIsContainer)",
+      "Bash(Sort-Object FullName)",
+      "Bash(Format-Table -AutoSize)"
     ]
   }
 }

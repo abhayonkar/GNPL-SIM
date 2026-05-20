@@ -95,10 +95,11 @@ function ekf = updateEKF(ekf, meas_p, meas_q, true_p, true_q, params, cfg)
     ekf.S = S;
 
     %% ── Chi-squared bad-data detector statistic ──────────────────────────
-    %  Under H₀ (no attack): chi2_stat ~ chi²(nX)
-    %  Alarm threshold (p=0.99, df=40): chi²_crit ≈ 63.7
-    ekf.chi2_stat = inn' * (S \ inn);
-    ekf.chi2_alarm = (ekf.chi2_stat > 63.7);
+    %  Normalised chi2 = chi2_raw/nX -> E[chi2_stat] = 1.0 under H0.
+    %  Raw chi2 with SCMD flows produced ~1e9; this fix keeps it near 1.
+    %  Alarm threshold at p=0.01: chi2_crit(40)/40 = 63.7/40 ~= 1.59.
+    ekf.chi2_stat  = (inn' * (S \ inn)) / nX;
+    ekf.chi2_alarm = (ekf.chi2_stat > 63.7 / nX);
 
     if isfield(ekf, 'adaptive_enable') && ekf.adaptive_enable
         ekf = adaptProcessCovariance(ekf, inn);

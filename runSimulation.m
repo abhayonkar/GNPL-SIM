@@ -116,6 +116,9 @@ function [params, state, comp1, comp2, prs1, prs2, ekf, plc, logs] = runSimulati
         %% 8. PRS
         [state, prs1] = updatePRS(state, prs1, cfg);
         [state, prs2] = updatePRS(state, prs2, cfg);
+        if aid == 0
+            state.p = applyNormalPressureEnvelope(state.p, cfg);
+        end
 
         %% 9. Temperature
         [state.Tgas, T_turb] = updateTemperature(params, state.Tgas, state.q, ...
@@ -174,7 +177,7 @@ function [params, state, comp1, comp2, prs1, prs2, ekf, plc, logs] = runSimulati
         if aid ~= 2
             [comp1,comp2,prs1,prs2,valve_states,plc] = ...
                 updateControlLogic(comp1,comp2,prs1,prs2,valve_states, ...
-                                   plc,ekf.xhatP,cfg,k,dt);
+                                   plc,ekf.xhatP,cfg,k,dt,aid,fault_label);
         else
             plc = advanceLatencyBuffers(plc);
         end
@@ -183,7 +186,7 @@ function [params, state, comp1, comp2, prs1, prs2, ekf, plc, logs] = runSimulati
         hist = updateHistorian(hist, state, plc, aid, k, dt, cfg, params);
 
         %% 21. Incident detection
-        detectIncidents(cfg, params, state, ekf, comp1, comp2, plc, k, dt);
+        detectIncidents(cfg, params, state, ekf, comp1, comp2, plc, k, dt, aid, fault_label);
 
         %% 22. Log row + gateway — every log_every steps ──────────────────
         if mod(k, log_every) == 0

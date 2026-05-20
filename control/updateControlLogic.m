@@ -1,6 +1,6 @@
 function [comp1, comp2, prs1, prs2, valve_states, plc] = ...
         updateControlLogic(comp1, comp2, prs1, prs2, valve_states, ...
-                           plc, xhatP, cfg, k, dt)
+                           plc, xhatP, cfg, k, dt, aid, fault_label)
 % updateControlLogic  Dual PID pressure control + PRS + safety interlocks.
 %
 %   CLAMP WARNING SUPPRESSION:
@@ -12,10 +12,14 @@ function [comp1, comp2, prs1, prs2, valve_states, plc] = ...
 
     if nargin < 9,  k  = 0;   end
     if nargin < 10, dt = 0.1; end
+    if nargin < 11, aid = 1; end
+    if nargin < 12, fault_label = 0; end
+    abnormal_active = aid > 0 || fault_label > 0;
 
     persistent int_err1 int_err2 prev_err1 prev_err2
     persistent cs1_was_clamped_min cs1_was_clamped_max
     persistent cs2_was_clamped_min cs2_was_clamped_max
+    persistent emerShutdownActive
 
     if isempty(int_err1),            int_err1            = 0;     end
     if isempty(int_err2),            int_err2            = 0;     end
@@ -25,6 +29,7 @@ function [comp1, comp2, prs1, prs2, valve_states, plc] = ...
     if isempty(cs1_was_clamped_max), cs1_was_clamped_max = false; end
     if isempty(cs2_was_clamped_min), cs2_was_clamped_min = false; end
     if isempty(cs2_was_clamped_max), cs2_was_clamped_max = false; end
+    if isempty(emerShutdownActive),  emerShutdownActive  = false; end
 
     %% ── CS1 PID ──────────────────────────────────────────────────────────
     err1      = cfg.pid1_setpoint - xhatP(cfg.pid_D1_node);
@@ -39,12 +44,7 @@ function [comp1, comp2, prs1, prs2, valve_states, plc] = ...
 
     if raw1 < comp1.ratio_min
         comp1.ratio = comp1.ratio_min;
-        if ~cs1_was_clamped_min   % log only on entry into clamped state
-            logEvent('WARNING', 'updateControlLogic', ...
-                     sprintf('CS1 ratio clamped to min %.2f (PID wind-up / low demand)', ...
-                             comp1.ratio_min), k, dt);
-            cs1_was_clamped_min = true;
-        end
+        cs1_was_clamped_min = true;
         cs1_was_clamped_max = false;
     elseif raw1 > comp1.ratio_max
         comp1.ratio = comp1.ratio_max;
@@ -74,11 +74,7 @@ function [comp1, comp2, prs1, prs2, valve_states, plc] = ...
 
         if raw2 < comp2.ratio_min
             comp2.ratio = comp2.ratio_min;
-            if ~cs2_was_clamped_min
-                logEvent('WARNING', 'updateControlLogic', ...
-                         sprintf('CS2 ratio clamped to min %.2f', comp2.ratio_min), k, dt);
-                cs2_was_clamped_min = true;
-            end
+            cs2_was_clamped_min = true;
             cs2_was_clamped_max = false;
         elseif raw2 > comp2.ratio_max
             comp2.ratio = comp2.ratio_max;
@@ -112,12 +108,16 @@ function [comp1, comp2, prs1, prs2, valve_states, plc] = ...
     end
 
     %% ── Valve E8 + emergency shutdown ────────────────────────────────────
-    if xhatP(cfg.pid_D1_node) > cfg.emer_shutdown_p
+    if abnormal_active && xhatP(cfg.pid_D1_node) > cfg.emer_shutdown_p
         valve_states(:) = 0;
-        logEvent('CRITICAL', 'updateControlLogic', ...
-                 sprintf('EMERGENCY SHUTDOWN — D1 = %.2f bar > %.1f bar MAOP', ...
-                         xhatP(cfg.pid_D1_node), cfg.emer_shutdown_p), k, dt);
+        if ~emerShutdownActive
+            emerShutdownActive = true;
+            logEvent('CRITICAL', 'updateControlLogic', ...
+                     sprintf('EMERGENCY SHUTDOWN — D1 = %.2f bar > %.1f bar MAOP', ...
+                             xhatP(cfg.pid_D1_node), cfg.emer_shutdown_p), k, dt);
+        end
     else
+        emerShutdownActive = false;
         if length(xhatP) >= 9
             p_J6 = xhatP(9);
             if p_J6 < cfg.valve_open_lo

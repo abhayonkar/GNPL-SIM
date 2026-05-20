@@ -49,12 +49,14 @@ function [state, q_sto] = updateStorage(state, params, cfg)
         state.p(n_sto) = state.p(n_sto) + 0.001 * q_withdraw;
     end
 
-    %% Apply net flow onto edge E15 (STO->J5) and E14 (J7->STO)
-    %  Edge 15 carries storage output flow; Edge 14 carries injection flow
-    if q_sto > 0
-        state.q(15) = state.q(15) + q_sto;    % STO injecting to J5
-    else
-        state.q(14) = state.q(14) + abs(q_sto); % network injecting to STO
+    %% Apply net flow onto storage edges per canonical_architecture.json:
+    %  E12 (index 12): STO→PRS2  — withdrawal flow out of storage to network
+    %  E11 (index 11): J7→STO    — injection flow from network into storage
+    %  (E14=S2→D1 and E15=D1→D2 are demand distribution edges, not storage)
+    if q_sto > 0   % storage withdrawing to network via STO→PRS2
+        state.q(12) = state.q(12) + q_sto;
+    else           % network injecting to storage via J7→STO
+        state.q(11) = state.q(11) + abs(q_sto);
     end
 
     state.p(n_sto) = max(0.1, min(state.p(n_sto), 70));

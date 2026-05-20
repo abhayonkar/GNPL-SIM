@@ -379,7 +379,9 @@ def main():
     lstm_det.fit(X_seq_normal, epochs=args.epochs, verbose=True)
 
     n_val_seq = max(100, int(len(X_seq_normal) * 0.2))
-    lstm_det.fit_threshold(X_seq_normal[-n_val_seq:], fpr=0.01)
+    # FPR=0.01 set threshold at q99 of normal scores → almost never fires on
+    # slow attacks whose scores barely exceed q99.  FPR=0.05 gives usable recall.
+    lstm_det.fit_threshold(X_seq_normal[-n_val_seq:], fpr=0.05)
     lstm_det.save(str(out_dir / "lstm_ae.pt"))
 
     lstm_scores = lstm_det.anomaly_score(X_seq_test)
@@ -434,7 +436,8 @@ def main():
                                 .tail(n_val)
                                 .reset_index(drop=True))
 
-        gnn_det.fit_threshold(X_node_normal[-n_val:], fpr=0.01)
+        # FPR=0.05 matches LSTM threshold; 0.01 caused all-zero predictions.
+        gnn_det.fit_threshold(X_node_normal[-n_val:], fpr=0.05)
         gnn_det.save(str(out_dir / "gnn.pt"))
 
         gnn_scores = gnn_det.anomaly_score(X_node_test)
@@ -486,11 +489,12 @@ def main():
             ids.fit_weights(X_seq_tr_all, X_node_tr_all, df_tr_sampled, y_seq_tr_all)
 
         # FIX 2: fit_threshold with the same n_val everywhere
+        # FPR=0.05 aligns with individual model thresholds; 0.01 starved recall.
         ids.fit_threshold(
             X_seq_normal[-n_val:],
             X_node_normal[-n_val:],
             df_train_normal_tail,
-            fpr=0.01)
+            fpr=0.05)
 
         # Inference — all three inputs are aligned to seq indexing
         hybrid_scores = ids.fuse_scores(X_seq_test, X_node_test, df_test_seq)
