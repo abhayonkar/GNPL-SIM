@@ -32,7 +32,12 @@ Usage:
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 import numpy as np
 import pandas as pd
@@ -149,11 +154,15 @@ def rebuild_48h_test(sweep_dir: Path, out_dir: Path) -> Path:
     manifest_path = sweep_dir / 'sweep_manifest.json'
     run_meta = {}
     if manifest_path.exists():
-        with open(manifest_path) as f:
-            mdata = json.load(f)
-        for r in mdata.get('runs', []):
-            run_meta[r['run_id']] = r
-        print(f"  Loaded manifest with {len(run_meta)} run configs")
+        try:
+            with open(manifest_path) as f:
+                mdata = json.load(f)
+            for r in mdata.get('runs', []):
+                run_meta[r['run_id']] = r
+            print(f"  Loaded manifest with {len(run_meta)} run configs")
+        except json.JSONDecodeError as exc:
+            print(f"  WARNING: could not parse {manifest_path}: {exc}")
+            print("           Continuing with empty metadata columns")
     else:
         print(f"  WARNING: sweep_manifest.json not found — metadata columns will be empty")
 
@@ -176,14 +185,16 @@ def rebuild_48h_test(sweep_dir: Path, out_dir: Path) -> Path:
         df = pd.read_csv(csv_path, low_memory=False)
         print(f"{len(df):,} rows")
 
-        df['run_id']    = run_id
-        df['clean_run'] = run_id in _CLEAN_RUN_IDS
-
         # Annotate from manifest when available
         meta = run_meta.get(run_id, {})
-        df['run_seed']        = meta.get('seed',        -1)
-        df['run_density']     = meta.get('density',     '')
-        df['run_description'] = meta.get('description', '')
+        run_cols = pd.DataFrame({
+            'run_id': run_id,
+            'clean_run': run_id in _CLEAN_RUN_IDS,
+            'run_seed': meta.get('seed', -1),
+            'run_density': meta.get('density', ''),
+            'run_description': meta.get('description', ''),
+        }, index=df.index)
+        df = pd.concat([df, run_cols], axis=1)
 
         frames.append(df)
 

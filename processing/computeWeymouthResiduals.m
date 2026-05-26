@@ -70,23 +70,12 @@ function [resid_p, resid_q] = computeWeymouthResiduals(ekf, state, params, cfg)
 
     q_wey  = sign(dp_abs) .* sqrt(max(0, K_e .* abs(dp_abs) .* p_sum));  % SCMD
 
-    %% Unit conversion: state.q is in kg/s; Weymouth K_e is calibrated for SCMD
-    %  Standard gas density at (Tb, Pb):
-    %    rho_std = Pb * (SG * M_air) / (R_gas * Tb)   [kg/m3]
-    %  where M_air = 28.97 kg/kmol (molar mass of dry air)
-    %        R_gas = 8.314 kPa·m3/(kmol·K)
-    %  Conversion: q_SCMD = q_kgs * 86400 / rho_std
-    M_air        = 28.97;                                     % kg/kmol
-    R_gas        = 8.314;                                     % kPa·m3/(kmol·K)
-    rho_std_kgm3 = Pb * (SG * M_air) / (R_gas * Tb);         % kg/m3
-    kgs_to_scmd  = 86400 / rho_std_kgm3;                     % SCMD per (kg/s)
-
     %% Flow residual: PLC reading vs Weymouth prediction
-    %  state.q is output by computeFlows in SCMD — no conversion needed.
-    %  Previous code multiplied by kgs_to_scmd (~120500x) then divided back,
-    %  but the subtraction happened at wrong scale → residual ≈ 0 always.
-    q_plc_scmd = state.q(1:nE);                        % SCMD (already correct units)
-    resid_q    = (q_plc_scmd - q_wey) / kgs_to_scmd;  % residual in kg/s
+    %  state.q is output by computeFlows in SCMD, matching q_wey.  Keep the
+    %  residual on the SCMD scale used by propagation labels and logged PLC
+    %  flows; dividing by kgs_to_scmd collapses the anomaly signal.
+    q_plc_scmd = state.q(1:nE);                 % SCMD (already correct units)
+    resid_q    = q_plc_scmd - q_wey;            % SCMD
 
     %% Pressure residual: EKF estimate vs physics-implied pressure
     %  Invert Weymouth to find what pressure each edge "should" have
@@ -105,7 +94,15 @@ function [resid_p, resid_q] = computeWeymouthResiduals(ekf, state, params, cfg)
     rhs = sign(q_plc_scmd) .* (q_plc_scmd.^2) ./ max(1e-6, K_e);   % signed Δ(P^2)
 
     p_sq_ref = p_abs .^ 2;
-    p2_implied = p_sq_ref + pinv(full(params.B')) * (rhs - params.B' * p_sq_ref);
+    A = full(params.B');
+    delta_rhs = rhs - A * p_sq_ref;
+
+    % Incidence matrices are rank-deficient, so a raw pseudoinverse can move
+    % pressure-squared estimates in the nullspace.  Use a damped correction
+    % anchored to the EKF pressure estimate instead.
+    ridge = 1e-3 * max(1, norm(A, 'fro')^2 / nN);
+    delta_p2 = (A' * A + ridge * eye(nN)) \ (A' * delta_rhs);
+    p2_implied = p_sq_ref + delta_p2;
     p_implied_abs  = sqrt(max(0, p2_implied));           % kPa abs
     p_implied_barg = kpa_abs_to_barg(p_implied_abs);     % barg
 

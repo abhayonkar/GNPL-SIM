@@ -38,6 +38,10 @@ import sys
 import warnings
 from pathlib import Path
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -165,6 +169,12 @@ LABEL_COLS  = ["label","ATTACK_ID","FAULT_ID","MITRE_CODE",
 def load_dataset(baseline_path: Path, attacks_path: Path | None = None,
                  nrows: int | None = None) -> pd.DataFrame:
     print(f"\n[load] Reading baseline → {baseline_path}")
+    if not baseline_path.exists():
+        raise FileNotFoundError(
+            f"Baseline dataset not found: {baseline_path}\n"
+            "Generate it with run_24h_sweep('mode','quick') in MATLAB, "
+            "or pass --baseline <path-to-existing-baseline.csv>."
+        )
     df = pd.read_csv(baseline_path, nrows=nrows, low_memory=False)
     print(f"       {len(df):,} rows  ×  {len(df.columns)} cols")
 
@@ -791,17 +801,20 @@ def main():
     # ── XGBoost (supervised) ─────────────────────────────────────────────────
     if HAS_XGB:
         print()
-        # Use 10% of training set as validation
-        val_frac = 0.1
-        n_val    = max(1, int(len(X_train) * val_frac))
-        rng      = np.random.default_rng(42)
-        val_idx  = rng.choice(len(X_train), size=n_val, replace=False)
-        tr_idx   = np.setdiff1d(np.arange(len(X_train)), val_idx)
-        xgb_clf  = train_xgboost(X_train[tr_idx], y_train[tr_idx],
-                                  X_train[val_idx], y_train[val_idx])
-        res_xgb  = eval_xgboost(xgb_clf, X_test, y_test, feat_cols, out_dir)
-        results.update(res_xgb)
-        joblib.dump(xgb_clf, out_dir / "xgboost.pkl")
+        if len(np.unique(y_train)) < 2:
+            print("[xgb] Skipping XGBoost: training data has only one class")
+        else:
+            # Use 10% of training set as validation
+            val_frac = 0.1
+            n_val    = max(1, int(len(X_train) * val_frac))
+            rng      = np.random.default_rng(42)
+            val_idx  = rng.choice(len(X_train), size=n_val, replace=False)
+            tr_idx   = np.setdiff1d(np.arange(len(X_train)), val_idx)
+            xgb_clf  = train_xgboost(X_train[tr_idx], y_train[tr_idx],
+                                      X_train[val_idx], y_train[val_idx])
+            res_xgb  = eval_xgboost(xgb_clf, X_test, y_test, feat_cols, out_dir)
+            results.update(res_xgb)
+            joblib.dump(xgb_clf, out_dir / "xgboost.pkl")
 
     # ── Cross-topology CV ────────────────────────────────────────────────────
     print()

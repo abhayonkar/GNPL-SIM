@@ -176,6 +176,7 @@ function cfg = build_attack_scenario_config(scen, dur_min, fault_en, n_atk)
     if n_atk > 0
         cfg.n_attacks = n_atk;   % explicit user override; else keep randomized value
     end
+    cfg.n_attacks = cap_attack_count_for_window(cfg);
     cfg.forced_attack_id = [];
     cfg.attack_selection = 1:10;
     cfg.fault_enable  = fault_en;
@@ -222,6 +223,31 @@ function cfg = build_attack_scenario_config(scen, dur_min, fault_en, n_atk)
         case 'CS2_only'
             cfg.comp1_ratio = 1.00; cfg.comp1_ratio_min = 1.00;
             cfg.comp1_ratio_max = 1.00;
+    end
+end
+
+function nA = cap_attack_count_for_window(cfg)
+    requested = max(0, round(cfg.n_attacks));
+    if requested == 0
+        nA = 0;
+        return;
+    end
+
+    available_s = cfg.T - cfg.atk_warmup_s - cfg.atk_recovery_s;
+    if available_s < cfg.atk_dur_min_s
+        nA = 0;
+        fprintf('[sweep] WARNING: attack window too short; disabling attacks for this scenario\n');
+        return;
+    end
+
+    per_attack_s = cfg.atk_dur_max_s + cfg.atk_min_gap_s;
+    max_fit = floor((available_s + cfg.atk_min_gap_s) / per_attack_s);
+    max_fit = max(1, max_fit);
+    nA = min(requested, max_fit);
+
+    if nA < requested
+        fprintf('[sweep] WARNING: capping n_attacks from %d to %d for %.1f min window\n', ...
+                requested, nA, cfg.T / 60);
     end
 end
 
@@ -350,6 +376,7 @@ end
 
 function assemble_attack_dataset(scen_dir, out_path)
     files = dir(fullfile(scen_dir, 'scenario_*.csv'));
+    files = files(~strcmp({files.name}, 'scenario_index.csv'));
     if isempty(files)
         fprintf('[assemble] No scenario CSVs found in %s\n', scen_dir);
         return;

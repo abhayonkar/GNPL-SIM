@@ -649,6 +649,7 @@ end
 
 function assemble_baseline_dataset(scen_dir, out_path)
     files = dir(fullfile(scen_dir, 'scenario_*.csv'));
+    files = files(~strcmp({files.name}, 'scenario_index.csv'));
     if isempty(files), fprintf('[assemble] No files found.\n'); return; end
     [~,ord] = sort({files.name}); files = files(ord);
 

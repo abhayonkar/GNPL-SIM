@@ -669,7 +669,7 @@ function write_metadata(opt, cfg, n_rows, n_regimes, attack_plan, wall_h)
     fprintf(fid, '  "n_regimes": %d,\n', n_regimes);
     fprintf(fid, '  "n_attacks": %d,\n', attack_plan.n_attacks);
     fprintf(fid, '  "attack_density": "%s",\n', opt.attack_density);
-    fprintf(fid, '  "attack_types": %s,\n', mat2str(opt.attack_types(:)'));
+    fprintf(fid, '  "attack_types": %s,\n', jsonencode(opt.attack_types(:)'));
     fprintf(fid, '  "seed": %d,\n', opt.seed);
     fprintf(fid, '  "gateway": %s,\n', lower(string(opt.gateway)));
     fprintf(fid, '  "fault_enable": %s,\n', lower(string(opt.fault_enable)));

@@ -240,7 +240,7 @@ function write_sweep_manifest(M, opt)
         fprintf(fid, '    { "run_id": %d, "seed": %d, "density": "%s", ', ...
                 i, M(i).seed, M(i).density);
         fprintf(fid, '"attack_types": %s, "description": "%s", ', ...
-                mat2str(M(i).attack_types), M(i).description);
+                jsonencode(M(i).attack_types(:)'), M(i).description);
         fprintf(fid, '"out_dir": "run_%02d" }%s\n', i, comma);
     end
     fprintf(fid, '  ]\n}\n');
