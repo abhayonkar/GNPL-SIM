@@ -3,7 +3,7 @@
 %  Indian CGD Gas Pipeline — Attack Windows Dataset Generator
 %
 %  Generates the attack_windows dataset: multi-scenario sweep where each
-%  30-min scenario contains randomised attacks (A1–A10).
+%  60-min scenario contains randomised attacks (A1–A10).
 %
 %  Output:
 %    automated_dataset/attack_windows/
@@ -32,7 +32,7 @@ function run_attack_windows(varargin)
     ap = inputParser();
     addParameter(ap, 'mode',      'full');
     addParameter(ap, 'resume',    1);
-    addParameter(ap, 'dur_min',   30);
+    addParameter(ap, 'dur_min',   60);
     addParameter(ap, 'gateway',   false);
     addParameter(ap, 'fault',     false);
     addParameter(ap, 'assemble',  true);
