@@ -1,7 +1,7 @@
 # Phase 0 — Physics-EKF Residual Diagnosis
 
 **Dataset:** `automated_dataset\attack_windows\physics_dataset_windows.csv`  
-**Generated:** 2026-05-26T14:34:30
+**Generated:** 2026-06-04T11:23:48
 
 ---
 
@@ -13,12 +13,12 @@ Physics anomaly score = L2(EKF residuals) + 0.1 × CUSUM_upper + 0.05 × chi2_st
 
 | Metric | Value |
 |--------|-------|
-| Normal mean | 301.9832 |
-| Attack mean | 127.3574 |
-| Normal std  | 2188.6963 |
-| Attack std  | 237.6581 |
-| Pooled std  | 1556.7390 |
-| **Cohen's d** | **0.112** |
+| Normal mean | 321.0077 |
+| Attack mean | 128.5831 |
+| Normal std  | 2183.1667 |
+| Attack std  | 192.0347 |
+| Pooled std  | 1549.6926 |
+| **Cohen's d** | **0.124** |
 
 **Assessment:** POOR SEPARATION (d < 0.5) — Residual is effectively random between classes. Calibration bug confirmed.
 
@@ -26,9 +26,9 @@ Physics anomaly score = L2(EKF residuals) + 0.1 × CUSUM_upper + 0.05 × chi2_st
 
 | Metric | Value |
 |--------|-------|
-| Normal mean | 4.4554 |
-| Attack mean | 4.4026 |
-| **Cohen's d** | **0.081** |
+| Normal mean | 4.6532 |
+| Attack mean | 4.5621 |
+| **Cohen's d** | **0.148** |
 
 **Assessment:** POOR SEPARATION (d < 0.5) — Residual is effectively random between classes. Calibration bug confirmed.
 
@@ -38,16 +38,16 @@ Physics anomaly score = L2(EKF residuals) + 0.1 × CUSUM_upper + 0.05 × chi2_st
 
 | Node | Normal mean | Attack mean | Cohen's d | Assessment |
 |------|-------------|-------------|-----------|------------|
-| J6 | 3.9540 | 2.1305 | 0.716 | ~ |
-| PRS1 | -7.7448 | -6.1499 | 0.676 | ~ |
-| S2 | -1.5793 | -1.3623 | 0.264 | ✗ |
-| CS1 | 1.4059 | 3.4923 | 0.235 | ✗ |
-| J1 | -1.2358 | -2.3463 | 0.231 | ✗ |
-| J2 | 0.6604 | -0.4630 | 0.216 | ✗ |
-| STO | 0.9168 | 0.5862 | 0.175 | ✗ |
-| CS2 | 5.0434 | 5.5450 | 0.164 | ✗ |
-| D3 | 0.6628 | 0.8234 | 0.145 | ✗ |
-| D1 | 0.2173 | -0.0297 | 0.136 | ✗ |
+| PRS1 | -7.6104 | -5.7575 | 0.668 | ~ |
+| J6 | 3.8437 | 1.9693 | 0.655 | ~ |
+| S2 | -2.0273 | -1.7411 | 0.330 | ✗ |
+| J1 | 0.5241 | -0.5711 | 0.212 | ✗ |
+| D3 | 0.8116 | 1.0248 | 0.199 | ✗ |
+| STO | 0.9424 | 0.5898 | 0.185 | ✗ |
+| CS2 | 4.9246 | 5.4688 | 0.173 | ✗ |
+| J4 | -1.5196 | -1.1827 | 0.169 | ✗ |
+| D1 | -0.0350 | -0.2908 | 0.163 | ✗ |
+| D6 | 0.0198 | 0.0883 | 0.157 | ✗ |
 
 ---
 
@@ -55,21 +55,21 @@ Physics anomaly score = L2(EKF residuals) + 0.1 × CUSUM_upper + 0.05 × chi2_st
 
 | Metric | Value |
 |--------|-------|
-| ekf_l2_normal_p50 | 15.9902 |
-| ekf_l2_normal_p99 | 20.7884 |
-| ekf_l2_attack_p50 | 14.9900 |
-| ekf_l2_attack_p99 | 54.6418 |
-| ekf_range_ratio | 2.6285 |
+| ekf_l2_normal_p50 | 16.8950 |
+| ekf_l2_normal_p99 | 22.6386 |
+| ekf_l2_attack_p50 | 15.8619 |
+| ekf_l2_attack_p99 | 53.6570 |
+| ekf_range_ratio | 2.3702 |
 | cusum_normal_p50 | 0.0000 |
-| cusum_normal_p99 | 79614.0378 |
+| cusum_normal_p99 | 79705.0994 |
 | cusum_attack_p50 | 0.0000 |
 | cusum_attack_p99 | 0.0000 |
-| ekf_cusum_correlation | 0.0203 |
+| ekf_cusum_correlation | 0.0340 |
 
 **Range interpretation:**
 
-- EKF L2 p99 ratio (attack/normal) = 2.63 ≥ 2 — adequate dynamic range.
-- EKF–CUSUM correlation = 0.020 ≈ 0 — residuals are **not** tracking the EKF innovation. Root cause: Weymouth residual is computed on wrong state (physics vs PLC bus mismatch).
+- EKF L2 p99 ratio (attack/normal) = 2.37 ≥ 2 — adequate dynamic range.
+- EKF–CUSUM correlation = 0.034 ≈ 0 — residuals are **not** tracking the EKF innovation. Root cause: Weymouth residual is computed on wrong state (physics vs PLC bus mismatch).
 
 ---
 
@@ -77,10 +77,10 @@ Physics anomaly score = L2(EKF residuals) + 0.1 × CUSUM_upper + 0.05 × chi2_st
 
 | Check | Result |
 |-------|--------|
-| Raw score separation (Cohen's d ≥ 1.5) | FAIL (d=0.112) |
-| Log score separation (Cohen's d ≥ 1.5) | FAIL (d=0.081) |
-| EKF range ratio ≥ 2.0 | PASS (ratio=2.63) |
-| EKF–CUSUM correlation ≥ 0.3 | FAIL (r=0.020) |
+| Raw score separation (Cohen's d ≥ 1.5) | FAIL (d=0.124) |
+| Log score separation (Cohen's d ≥ 1.5) | FAIL (d=0.148) |
+| EKF range ratio ≥ 2.0 | PASS (ratio=2.37) |
+| EKF–CUSUM correlation ≥ 0.3 | FAIL (r=0.034) |
 
 **Next step:**
 

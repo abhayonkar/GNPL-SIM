@@ -30,6 +30,19 @@ function [cusum, alarm] = updateCUSUM(cusum, residual, cfg, step)
     % Accumulate step counter
     cusum.n_steps = cusum.n_steps + 1;
 
+    if isstruct(residual)
+        if isfield(residual, 'residualP')
+            residual = residual.residualP;
+        elseif isfield(residual, 'residP')
+            residual = residual.residP;
+        elseif isfield(residual, 'residual')
+            residual = residual.residual;
+        else
+            error('updateCUSUM:InvalidResidual', ...
+                  'Residual struct must contain residualP, residP, or residual.');
+        end
+    end
+
     % Scalar summary: use max absolute residual across nodes
     if numel(residual) > 1
         r = max(abs(residual));

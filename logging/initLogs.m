@@ -73,6 +73,12 @@ function logs = initLogs(params, ekf, N, cfg)
     logs.logChi2         = zeros(1, N_log);
     logs.logChi2_alarm   = false(1, N_log);
 
+    %% Phase C: propagation labels
+    logs.logPropOrigin  = zeros(1, N_log, 'int32');
+    logs.logPropHop     = zeros(1, N_log, 'int32');
+    logs.logPropDelay   = zeros(1, N_log);
+    logs.logPropCascade = zeros(1, N_log, 'int32');
+
     %% Metadata
     logs.N_log     = N_log;
     logs.log_every = max(1, cfg.log_every);

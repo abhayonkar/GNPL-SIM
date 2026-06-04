@@ -1,9 +1,9 @@
 {
-  "total_rows": 162000,
-  "n_scenarios": 30,
-  "n_features": 161,
-  "normal_rows": 120605,
-  "anomaly_rows": 41395,
+  "total_rows": 763200,
+  "n_scenarios": 208,
+  "n_features": 158,
+  "normal_rows": 499735,
+  "anomaly_rows": 263465,
   "attack_ids_present": [
     0,
     1,

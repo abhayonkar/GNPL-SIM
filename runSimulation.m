@@ -58,6 +58,7 @@ function [params, state, comp1, comp2, prs1, prs2, ekf, plc, logs] = runSimulati
     cusum      = initCUSUM(cfg);
     hist       = initHistorian(params, cfg);
     fault      = initFaultState(params.nNodes, params.nEdges, cfg);
+    prop_state = initPropagationState(params.nNodes, cfg);
 
     log_k           = 0;
     replay_k_attack = 0;
@@ -230,6 +231,15 @@ function [params, state, comp1, comp2, prs1, prs2, ekf, plc, logs] = runSimulati
                 if isfield(logs,'logChi2')
                     logs.logChi2(log_k)      = ekf.chi2_stat;
                     logs.logChi2_alarm(log_k) = ekf.chi2_alarm;
+                end
+                if isfield(logs,'logPropOrigin')
+                    [prop_labels, prop_state] = computePropagationLabels( ...
+                        ekf.residualP, ekf.residualQ, aid, k, log_k, ...
+                        params, cfg, prop_state);
+                    logs.logPropOrigin(log_k)  = int32(prop_labels.origin_node);
+                    logs.logPropHop(log_k)     = int32(prop_labels.hop_node);
+                    logs.logPropDelay(log_k)   = prop_labels.delay_s;
+                    logs.logPropCascade(log_k) = int32(prop_labels.cascade_step);
                 end
             end
         end

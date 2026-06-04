@@ -131,9 +131,12 @@ def equipment_cols(df):
                   "valve_E8", "valve_E14", "valve_E15"]
     return [c for c in candidates if c in df.columns]
 
+LEAKAGE_FEATURES = {"Timestamp_s", "delta_t_s", "time_sin", "time_cos"}
+
+
 def build_feature_cols(df):
     """Return ordered list of numeric feature columns (no metadata, no labels)."""
-    return (
+    feat_cols = (
         pressure_cols(df)
         + flow_cols(df)
         + equipment_cols(df)
@@ -142,9 +145,6 @@ def build_feature_cols(df):
         + plc_p_cols(df)
         + plc_q_cols(df)
         + [c for c in [
-            "delta_t_s",
-            "time_sin",
-            "time_cos",
             "regime_id_num",
             "source_config_code",
             "demand_profile_code",
@@ -154,6 +154,7 @@ def build_feature_cols(df):
             "replay_flow_autocorr",
         ] if c in df.columns]
     )
+    return [c for c in feat_cols if c not in LEAKAGE_FEATURES]
 
 META_COLS   = ["Timestamp_s","scenario_id","source_config","demand_profile",
                "valve_config","storage_init","cs_mode"]
@@ -582,7 +583,7 @@ def plot_eda(df: pd.DataFrame, out_dir: Path):
     for ax, col in zip(axes.flat, q_cols):
         ax.hist(df[col].dropna(), bins=60, color="coral", edgecolor="none")
         ax.set_title(col.replace("q_","").replace("_kgs",""), fontsize=8)
-        ax.set_xlabel("kg/s", fontsize=7)
+        ax.set_xlabel("SCMD", fontsize=7)
     fig.suptitle("Flow Edge Distributions (all scenarios)", fontsize=12)
     fig.tight_layout()
     fig.savefig(out_dir / "flow_distributions.png", dpi=150)
@@ -781,12 +782,8 @@ def main():
     results = {}
 
     # ── Isolation Forest (unsupervised) ──────────────────────────────────────
-    # Train on FULL training set so contamination fraction is meaningful.
-    # Previously trained on normal-only data which caused 24% FPR (model
-    # learned to flag top-24% of normal distribution as anomalous).
     normal_mask   = y_train == 0
-    contamination = min(0.45, max(0.01, (y_train > 0).mean()))
-    iforest = train_isolation_forest(X_train, contamination=contamination)
+    iforest = train_isolation_forest(X_train[normal_mask], contamination=0.05)
     res_if  = eval_isolation_forest(iforest, X_test, y_test, out_dir)
     results.update(res_if)
     joblib.dump(iforest, out_dir / "iforest.pkl")

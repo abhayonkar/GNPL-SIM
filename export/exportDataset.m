@@ -58,6 +58,8 @@ function exportDataset(logs, cfg, params, N, schedule)
     for i = 1:params.nEdges
         col_names{end+1} = sprintf('%s_plc_q', char(en(i)));
     end
+    col_names = [col_names, {'prop_origin_node','prop_hop_node', ...
+                             'prop_delay_s','prop_cascade_step'}];
     col_names = [col_names, {'ATTACK_ID','ATTACK_NAME','MITRE_ID'}];
 
     %% ── Map log fields (handle both naming conventions) ──────────────────
@@ -79,6 +81,10 @@ function exportDataset(logs, cfg, params, N, schedule)
     srcP1  = getfield_safe(logs, 'logSrcP1', 'logSrcP', ones(1,N_log)*cfg.p0);
     srcP2  = getfield_safe(logs, 'logSrcP2', [],        ones(1,N_log)*cfg.p0);
     demand = getfield_safe(logs, 'logDemand', [],       ones(1,N_log));
+    prop_origin  = getfield_safe(logs, 'logPropOrigin',  [], zeros(1,N_log));
+    prop_hop     = getfield_safe(logs, 'logPropHop',     [], zeros(1,N_log));
+    prop_delay   = getfield_safe(logs, 'logPropDelay',   [], zeros(1,N_log));
+    prop_cascade = getfield_safe(logs, 'logPropCascade', [], zeros(1,N_log));
 
     %% ── Timestamp vector using log_dt ────────────────────────────────────
     %  Row k corresponds to physics step k * log_every, time = (k-1)*log_dt
@@ -93,7 +99,9 @@ function exportDataset(logs, cfg, params, N, schedule)
                 valve_E8(1:N_log), valve_E14(1:N_log), valve_E15(1:N_log), ...
                 srcP1(1:N_log)', srcP2(1:N_log)', demand(1:N_log)', ...
                 logs.logResP(:,1:N_log)', ...
-                logs.logPlcP(:,1:N_log)', logs.logPlcQ(:,1:N_log)'];
+                logs.logPlcP(:,1:N_log)', logs.logPlcQ(:,1:N_log)', ...
+                prop_origin(1:N_log)', prop_hop(1:N_log)', ...
+                prop_delay(1:N_log)', prop_cascade(1:N_log)'];
 
     %% ── master_dataset.csv ───────────────────────────────────────────────
     fid = fopen(fullfile(outDir, 'master_dataset.csv'), 'w');

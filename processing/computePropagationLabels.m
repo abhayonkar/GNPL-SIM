@@ -59,6 +59,8 @@ function [labels, state_prop] = computePropagationLabels(resid_p, resid_q, ...
 %     state_prop — updated state
 
     nN     = params.nNodes;
+    if ~isfield(cfg, 'prop_baseline_win'),  cfg.prop_baseline_win  = 300; end
+    if ~isfield(cfg, 'prop_sigma_thresh'),  cfg.prop_sigma_thresh  = 3.0; end
     win    = cfg.prop_baseline_win;    % rolling window length (log rows)
     thresh = cfg.prop_sigma_thresh;    % detection threshold (σ multipliers)
     dt_log = cfg.dt * cfg.log_every;   % seconds per log row

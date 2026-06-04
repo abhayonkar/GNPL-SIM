@@ -70,8 +70,10 @@ fprintf('[Step 2] apply_cgd_overrides...\n');
 cfg = apply_cgd_overrides(cfg);
 assert(all(cfg.src_p_barg >= 20 & cfg.src_p_barg <= 26), ...
     'After overrides: src_p_barg out of range');
-assert(cfg.comp_ratio_nom(1) >= 1.1 && cfg.comp_ratio_nom(1) <= 1.6, ...
-    'After overrides: comp_ratio_nom out of [1.1, 1.6]');
+assert(all(cfg.comp_ratio_nom >= cfg.comp_ratio_min & cfg.comp_ratio_nom <= cfg.comp_ratio_max), ...
+    'After overrides: comp_ratio_nom out of configured compressor bounds');
+assert(cfg.comp_ratio_nom(1) <= 1.1 && cfg.comp_ratio_nom(2) <= 1.1, ...
+    'After overrides: comp_ratio_nom no longer reflects low-ratio MAOP-safe defaults');
 fprintf('  Step 2 PASS\n\n');
 
 %% ── Step 3: updateFlow isolated call ────────────────────────────────────
@@ -100,7 +102,7 @@ fprintf('[Step 4] CUSUM false-alarm test (1000 steps white noise)...\n');
 cs = initCUSUM(cfg);
 n_alarms = 0;
 for k2 = 1:1000
-    cs = updateCUSUM(cs, randn(20,1)*0.5, cfg, k2, cfg.dt);
+    cs = updateCUSUM(cs, randn(20,1)*0.5, cfg, k2);
     if cs.alarm, n_alarms = n_alarms + 1; end
 end
 fprintf('  Alarms on white noise (slack=%.1f, warmup=%d): %d\n', ...
@@ -115,7 +117,7 @@ cs2 = initCUSUM(cfg);
 tripped = false;
 trip_step = NaN;
 for k2 = 1:600
-    cs2 = updateCUSUM(cs2, ones(20,1)*5.0, cfg, k2, cfg.dt);
+    cs2 = updateCUSUM(cs2, ones(20,1)*5.0, cfg, k2);
     if cs2.alarm && ~tripped
         tripped    = true;
         trip_step  = k2;
@@ -132,7 +134,7 @@ fprintf('  Step 5 PASS\n\n');
 fprintf('[Step 6] CUSUM accepts EKF struct (runSimulation path)...\n');
 ekf_mock.residualP = randn(20,1) * 0.1;
 cs3 = initCUSUM(cfg);
-cs3 = updateCUSUM(cs3, ekf_mock, cfg, 400, cfg.dt);
+cs3 = updateCUSUM(cs3, ekf_mock, cfg, 400);
 assert(isfield(cs3, 'S_upper'), 'S_upper field missing');
 assert(isfield(cs3, 'S_lower'), 'S_lower field missing');
 assert(isfield(cs3, 'alarm'),   'alarm field missing');

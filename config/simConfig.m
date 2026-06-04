@@ -184,7 +184,7 @@ function cfg = simConfig()
     % With flows now in SCMD (800 nominal), R=25 gives chi2_stat ≈ 1 under H0.
     cfg.ekf_R_diag     = 25.0;     % WAS: 0.05 → now matches noise_sigma_q^2 = 5^2
     cfg.ekf_Q_diag     = 1e-3;     % process uncertainty (unchanged)
-    cfg.ekf_P0_diag    = 1e-2;      % initial covariance
+    cfg.ekf_P0_diag    = 1000.0;    % initial covariance on SCMD-scale flow states
 
     % ================================================================
     % CUSUM PARAMETERS  — Phase A cold-start fix
@@ -238,6 +238,12 @@ function cfg = simConfig()
 
     % Column schema version (bump when novel columns added in Phase C)
     cfg.schema_version  = 'v2.0-phase-c';
+
+    % ================================================================
+    % PROPAGATION LABELS  (Phase C fields)
+    % ================================================================
+    cfg.prop_baseline_win = 300;        % rolling baseline length [log rows]
+    cfg.prop_sigma_thresh = 3.0;        % trigger threshold [sigma]
 
     % ================================================================
     % PHYSICS CONSTANTS  (natural gas at Indian CGD operating conditions)

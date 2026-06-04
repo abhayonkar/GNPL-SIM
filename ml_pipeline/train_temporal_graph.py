@@ -73,6 +73,7 @@ LABEL_COLS = ["label","ATTACK_ID","FAULT_ID","MITRE_CODE",
               "prop_origin_node","prop_hop_node","prop_delay_s",
               "prop_cascade_step","cusum_alarm","chi2_alarm",
               "attack_start","recovery_start","recovery_phase"]
+LEAKAGE_FEATURES = {"Timestamp_s", "delta_t_s", "time_sin", "time_cos"}
 
 
 def add_temporal_context_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -153,7 +154,10 @@ def load_and_prepare(data_path: Path, nrows=None):
         )
 
     df = add_temporal_context_features(df)
-    feat_cols = [c for c in df.columns if c not in skip and df[c].dtype != object]
+    feat_cols = [
+        c for c in df.columns
+        if c not in skip and c not in LEAKAGE_FEATURES and df[c].dtype != object
+    ]
     df[feat_cols] = df[feat_cols].ffill().bfill().fillna(0)
 
     return df, feat_cols

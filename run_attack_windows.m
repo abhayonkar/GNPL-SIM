@@ -317,6 +317,7 @@ function export_attack_scenario_csv(logs, cfg, params, schedule, scen, fpath)
     for i=1:params.nNodes, hdr=[hdr sprintf(',p_%s_bar',char(nn(i)))]; end %#ok
     for i=1:params.nEdges, hdr=[hdr sprintf(',q_%s_kgs',char(en(i)))]; end %#ok
     hdr=[hdr ',CS1_ratio,CS1_power_kW,CS2_ratio,CS2_power_kW'];
+    hdr=[hdr ',PRS1_throttle,PRS2_throttle'];
     hdr=[hdr ',valve_E8,valve_E14,valve_E15,STO_inventory'];
     hdr=[hdr ',cusum_S_upper,cusum_S_lower,cusum_alarm,chi2_stat,chi2_alarm'];
     for i=1:params.nNodes, hdr=[hdr sprintf(',ekf_resid_%s',char(nn(i)))]; end %#ok
@@ -355,6 +356,7 @@ function export_attack_scenario_csv(logs, cfg, params, schedule, scen, fpath)
         fprintf(fid, ',%.4f,%.3f,%.4f,%.3f', ...
             logs.logCompRatio1(k), logs.logPow1(k)/1000, ...
             logs.logCompRatio2(k), logs.logPow2(k)/1000);
+        fprintf(fid, ',%.4f,%.4f', logs.logPRS1Throttle(k), logs.logPRS2Throttle(k));
         fprintf(fid, ',%.3f,%.3f,%.3f', logV(1,k), logV(2,k), logV(3,k));
         fprintf(fid, ',%.4f', logs.logStoInventory(k));
         fprintf(fid, ',%.4f,%.4f,%d,%.4f,%d', ...

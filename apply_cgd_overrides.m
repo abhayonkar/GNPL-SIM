@@ -48,6 +48,8 @@ function cfg = apply_cgd_overrides(cfg)
     % ── PLC / latency ────────────────────────────────────────────────────
     if ~isfield(cfg, 'plc_latency'),        cfg.plc_latency        = 1;    end
     if ~isfield(cfg, 'atk7_extra_latency'), cfg.atk7_extra_latency = 5;    end
+    if ~isfield(cfg, 'prop_baseline_win'),  cfg.prop_baseline_win  = 300;  end
+    if ~isfield(cfg, 'prop_sigma_thresh'),  cfg.prop_sigma_thresh  = 3.0;  end
 
     % ── Storage ───────────────────────────────────────────────────────────
     if ~isfield(cfg, 'sto_inventory_init'), cfg.sto_inventory_init = 0.60; end
