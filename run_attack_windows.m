@@ -173,6 +173,12 @@ function cfg = build_attack_scenario_config(scen, dur_min, fault_en, n_atk)
     cfg   = randomize_attack_params(cfg, scen.id);   % ← randomize per scenario
 
     cfg.T             = dur_min * 60;
+
+    % Apply physics-confirmed recovery gap before capacity check.
+    tau_acoustic_s    = max(cfg.pipe_L) * 1000 / cfg.c;
+    tau_control_s     = max(cfg.prs1_tau, cfg.prs2_tau) * 3;
+    cfg.atk_min_gap_s = max(cfg.atk_min_gap_s, ceil(tau_acoustic_s + tau_control_s + 30));
+
     if n_atk > 0
         cfg.n_attacks = n_atk;   % explicit user override; else keep randomized value
     end
@@ -323,7 +329,7 @@ function export_attack_scenario_csv(logs, cfg, params, schedule, scen, fpath)
     for i=1:params.nNodes, hdr=[hdr sprintf(',ekf_resid_%s',char(nn(i)))]; end %#ok
     for i=1:params.nNodes, hdr=[hdr sprintf(',plc_p_%s',char(nn(i)))]; end %#ok
     for i=1:params.nEdges, hdr=[hdr sprintf(',plc_q_%s',char(en(i)))]; end %#ok
-    hdr=[hdr ',FAULT_ID,ATTACK_ID,ATTACK_NAME,MITRE_ID,label'];
+    hdr=[hdr ',FAULT_ID,ATTACK_ID,ATTACK_NAME,MITRE_ID,label,regime_class'];
 
     if isfield(logs,'logValveStates') && size(logs.logValveStates,1)>=3
         logV = logs.logValveStates;
@@ -348,7 +354,7 @@ function export_attack_scenario_csv(logs, cfg, params, schedule, scen, fpath)
 
     for k = 1:N_log
         atk_id = logs.logAttackId(k);
-        label  = int32(logFault(k) > 0 || atk_id > 0);
+        label  = int32(atk_id > 0);
 
         fprintf(fid, '%.3f,%s', t_vec(k), meta);
         fprintf(fid, ',%.4f', logs.logP(:,k));
@@ -364,9 +370,12 @@ function export_attack_scenario_csv(logs, cfg, params, schedule, scen, fpath)
         fprintf(fid, ',%.4f', logs.logResP(:,k));
         fprintf(fid, ',%.4f', logs.logPlcP(:,k));
         fprintf(fid, ',%.4f', logs.logPlcQ(:,k));
-        fprintf(fid, ',%d,%d,%s,%s,%d\n', ...
+        % Map physics-step index k back to schedule step (logs are decimated by log_every)
+        k_sched = min(size(schedule.regime_class, 1), k * max(1, cfg.log_every));
+        regime  = char(schedule.regime_class(k_sched));
+        fprintf(fid, ',%d,%d,%s,%s,%d,%s\n', ...
                 logFault(k), atk_id, ...
-                char(logs.logAttackName(k)), char(logs.logMitreId(k)), label);
+                char(logs.logAttackName(k)), char(logs.logMitreId(k)), label, regime);
     end
     fclose(fid);
 end

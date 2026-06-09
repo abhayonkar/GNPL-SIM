@@ -171,6 +171,12 @@ function run_48h_continuous(varargin)
     prev_aid         = 0;
     demand_vec       = zeros(params.nNodes, 1);
 
+    % Physics-confirmed recovery window (acoustic transit + PID settling + buffer)
+    tau_acoustic_s       = max(cfg.pipe_L) * 1000 / cfg.c;
+    tau_control_s        = max(cfg.prs1_tau, cfg.prs2_tau) * 3;
+    recovery_confirmed_s = ceil(tau_acoustic_s + tau_control_s + 30);
+    recovery_start_s     = -Inf;   % time of last attack end
+
     logEvent(-1);   % reset logger
 
     for k = 1:N
@@ -197,6 +203,12 @@ function run_48h_continuous(varargin)
 
         %% ── Standard simulation step (same as runSimulation) ─────────────
         aid = double(schedule.label_id(k));
+
+        % Detect attack-end → start recovery clock
+        if prev_aid > 0 && aid == 0
+            recovery_start_s = t_s;
+        end
+        is_recovery = (aid == 0) && (t_s - recovery_start_s) < recovery_confirmed_s;
 
         [src_p1_k, src_p2_k, comp1, comp2, plc, valve_states, demand_k] = ...
             applyAttackEffects(aid, k, dt, schedule, src_p1(k), src_p2(k), ...
@@ -278,7 +290,9 @@ function run_48h_continuous(varargin)
         end
 
         ekf   = updateEKF(ekf, plc.reg_p, plc.reg_q, state.p, state.q, params, cfg);
-        cusum = updateCUSUM(cusum, ekf.residual, cfg, k);
+        R_sigma = [repmat(cfg.noise_sigma_p, params.nNodes, 1); ...
+                   repmat(cfg.noise_sigma_q, params.nEdges, 1)];
+        cusum = updateCUSUM(cusum, ekf.residual ./ R_sigma, cfg, k);
 
         if aid ~= 2
             [comp1, comp2, prs1, prs2, valve_states, plc] = ...
@@ -310,8 +324,8 @@ function run_48h_continuous(varargin)
                                 cusum, sensor_p, sensor_q, src_p1_k, src_p2_k, ...
                                 demand_k, q_sto, aid, fault_label, ...
                                 schedule, k, params, cfg, ...
-                                atk_start_s_vec(k), ...   % ← new arg
-                                current_regime - 1);
+                                atk_start_s_vec(k), ...
+                                current_regime - 1, is_recovery);
         end
 
         %% ── Progress ─────────────────────────────────────────────────────
@@ -615,8 +629,7 @@ function fid = open_streaming_csv(fpath, params)
     for i = 1:params.nNodes, hdr = [hdr sprintf(',ekf_resid_%s', char(nn(i)))]; end %#ok
     for i = 1:params.nNodes, hdr = [hdr sprintf(',plc_p_%s', char(nn(i)))]; end %#ok
     for i = 1:params.nEdges, hdr = [hdr sprintf(',plc_q_%s', char(en(i)))]; end %#ok
-    hdr = [hdr ',FAULT_ID,ATTACK_ID,ATTACK_START_S,MITRE_CODE,label'];
-    %        ↑ added ATTACK_START_S between ATTACK_ID and MITRE_CODE
+    hdr = [hdr ',FAULT_ID,ATTACK_ID,ATTACK_START_S,MITRE_CODE,label,regime_class'];
     fprintf(fid, '%s\n', hdr);
 end
 
@@ -625,7 +638,7 @@ function write_streaming_row(fid, log_k, t_s, state, ekf, plc, ...
                               comp1, comp2, prs1, prs2, valve_states, ...
                               cusum, sensor_p, sensor_q, src_p1, src_p2, ...
                               demand_k, q_sto, aid, fault_label, ...
-                              schedule, k, params, cfg, atk_start_s, regime_id)
+                              schedule, k, params, cfg, atk_start_s, regime_id, is_recovery)
 
     mitre_str = char(schedule.label_mitre(k));
     mitre_lut = containers.Map( ...
@@ -634,7 +647,11 @@ function write_streaming_row(fid, log_k, t_s, state, ekf, plc, ...
     mc = 0;
     if isKey(mitre_lut, mitre_str), mc = mitre_lut(mitre_str); end
 
-    label = int32(fault_label > 0 || aid > 0);
+    label = int32(aid > 0);   % Attack label; FAULT_ID is preserved separately.
+    if aid > 0,      regime_class = 'attack';
+    elseif is_recovery, regime_class = 'recovery';
+    else,            regime_class = 'normal';
+    end
 
     fprintf(fid, '%.3f,%d', t_s, regime_id);
     fprintf(fid, ',%.4f', state.p);
@@ -647,10 +664,10 @@ function write_streaming_row(fid, log_k, t_s, state, ekf, plc, ...
     fprintf(fid, ',%.4f,%.4f,%d,%.4f,%d', ...
             cusum.S_upper, cusum.S_lower, int32(cusum.alarm), ...
             ekf.chi2_stat, int32(ekf.chi2_alarm));
-    fprintf(fid, ',%.4f', ekf.xhat(1:params.nNodes) - state.p);
+    fprintf(fid, ',%.4f', ekf.residualP / cfg.noise_sigma_p);   % z-score innovations (Fix 2+5)
     fprintf(fid, ',%.4f', plc.reg_p);
     fprintf(fid, ',%.4f', plc.reg_q);
-    fprintf(fid, ',%d,%d,%.1f,%d,%d\n', fault_label, aid, atk_start_s, mc, label);
+    fprintf(fid, ',%d,%d,%.1f,%d,%d,%s\n', fault_label, aid, atk_start_s, mc, label, regime_class);
     
 end
 

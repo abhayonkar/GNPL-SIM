@@ -20,10 +20,16 @@ function schedule = initAttackSchedule(N, cfg)
 
     warmup_s   = cfg.atk_warmup_s;
     recovery_s = cfg.atk_recovery_s;
-    min_gap_s  = cfg.atk_min_gap_s;
     dur_min    = cfg.atk_dur_min_s;
     dur_max    = cfg.atk_dur_max_s;
     usable_end = T_total - recovery_s;
+
+    % ── Physics-confirmed recovery gap ────────────────────────────────────
+    % Pressure must re-equilibrate (acoustic transit) + PRS PID must settle.
+    tau_acoustic_s       = max(cfg.pipe_L) * 1000 / cfg.c;   % ≈ 9 km / 420 m/s ≈ 21 s
+    tau_control_s        = max(cfg.prs1_tau, cfg.prs2_tau) * 3;  % 3τ ≈ 90 s
+    recovery_confirmed_s = ceil(tau_acoustic_s + tau_control_s + 30);  % ≈ 141 → 150 s
+    min_gap_s = max(cfg.atk_min_gap_s, recovery_confirmed_s);
 
     %% ── Select attack IDs ────────────────────────────────────────────────
     % forced_attack_id overrides random selection
@@ -117,6 +123,18 @@ function schedule = initAttackSchedule(N, cfg)
         schedule.dur_s(i)  = dur;
         schedule.params{i} = char(pstrs(min(aid, numel(pstrs))));
     end
+
+    %% Build per-step regime_class ('normal' / 'attack' / 'recovery')
+    schedule.recovery_confirmed_s = recovery_confirmed_s;
+    schedule.regime_class = repmat("normal", N, 1);
+    for i = 1:nA
+        k_end = min(N, round(schedule.end_s(i) / dt));
+        k_rec = min(N, round((schedule.end_s(i) + recovery_confirmed_s) / dt));
+        if k_rec > k_end
+            schedule.regime_class(k_end+1 : k_rec) = "recovery";
+        end
+    end
+    schedule.regime_class(schedule.label_id > 0) = "attack";
 
     %% Console summary
     normal_steps = sum(schedule.label_id == 0);

@@ -1,5 +1,5 @@
 model,family,n_runs,f1_mean,f1_std,auc_mean,auc_std,precision_mean,precision_std,recall_mean,recall_std,detection_delay_median_s_mean,detection_delay_median_s_std
-GNN,ALL,9,0.7909,0.071,0.4949,0.0153,0.8943,0.0038,0.7155,0.1046,,
-Hybrid-IDS,ALL,9,0.8747,0.0236,0.4944,0.0153,0.8947,0.004,0.8564,0.0433,,
-LSTM-AE,ALL,9,0.9037,0.01,0.5014,0.0169,0.8945,0.0043,0.9131,0.0178,,
-Physics-EKF,ALL,9,0.0,0.0,0.504,0.0122,0.0,0.0,0.0,0.0,,
+GNN,ALL,9,0.0,0.0,,,0.0,0.0,0.0,0.0,,
+Hybrid-IDS,ALL,9,0.0,0.0,,,0.0,0.0,0.0,0.0,,
+LSTM-AE,ALL,9,0.0,0.0,,,0.0,0.0,0.0,0.0,,
+Physics-EKF,ALL,9,0.0,0.0,,,0.0,0.0,0.0,0.0,,

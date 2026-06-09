@@ -14,7 +14,7 @@ function cfg = simConfig()
 %   >> cfg = simConfig();
 %   >> assert(cfg.src_p_barg(1) >= 20 && cfg.src_p_barg(1) <= 26)
 %   >> assert(cfg.sto_p_inject == 24.5)
-%   >> assert(cfg.cusum_slack  == 2.5)
+%   >> assert(cfg.cusum_slack  == 3.5)
 
     arch = loadCanonicalArchitecture();
 
@@ -183,15 +183,16 @@ function cfg = simConfig()
     % R=0.05 orders of magnitude too large relative to actual flow values.
     % With flows now in SCMD (800 nominal), R=25 gives chi2_stat ≈ 1 under H0.
     cfg.ekf_R_diag     = 25.0;     % WAS: 0.05 → now matches noise_sigma_q^2 = 5^2
-    cfg.ekf_Q_diag     = 1e-3;     % process uncertainty (unchanged)
+    cfg.ekf_Q_p_diag = 0.01;    % bar² — allow pressure state to adapt
+    cfg.ekf_Q_q_diag = 10.0;    % SCMD^2 - allow flow state to adapt
     cfg.ekf_P0_diag    = 1000.0;    % initial covariance on SCMD-scale flow states
 
     % ================================================================
     % CUSUM PARAMETERS  — Phase A cold-start fix
     % ================================================================
     % Old slack=1.0 caused 816 false alarms during normal operation.
-    % Raised to 2.5; warmup window skips alarm evaluation for first 300 s.
-    cfg.cusum_slack         = 2.5;      % k — allowable slack (sigma units)
+    % Raised to 3.5; E[max(|Z_1..Z_40|)] ≈ 2.7 so 3.5 sits above noise floor.
+    cfg.cusum_slack         = 3.5;      % k — allowable slack (sigma units)
     cfg.cusum_threshold     = 12.0;     % h — decision threshold
     cfg.cusum_warmup_steps  = 300;      % steps at cfg.dt before alarms active
     cfg.cusum_reset_on_trip = true;     % reset accumulators after alarm
@@ -453,7 +454,9 @@ function cfg = simConfig()
     % EKF PARAMETER ALIASES  (initEKF.m uses ekf_P0, ekf_Qn, ekf_Rk)
     % ================================================================
     cfg.ekf_P0 = cfg.ekf_P0_diag;   % scalar initial covariance (-> eye*P0 in initEKF)
-    cfg.ekf_Qn = cfg.ekf_Q_diag;    % scalar process noise variance
+    cfg.ekf_Qn = diag([ ...
+        repmat(cfg.ekf_Q_p_diag, cfg.n_nodes, 1); ...
+        repmat(cfg.ekf_Q_q_diag, cfg.ekf_n_states - cfg.n_nodes, 1)]);
     cfg.ekf_Rk = cfg.ekf_R_diag;    % scalar measurement noise variance
 
     % ================================================================
@@ -527,8 +530,8 @@ function cfg = simConfig()
     % ================================================================
     cfg.ekf_adaptive_enable         = true;
     cfg.ekf_adaptive_lambda         = 0.98;
-    cfg.ekf_adaptive_q_floor        = cfg.ekf_Qn;
-    cfg.ekf_adaptive_q_cap          = 2.5e-2;
+    cfg.ekf_adaptive_q_floor        = diag(cfg.ekf_Qn);
+    cfg.ekf_adaptive_q_cap          = 25 * diag(cfg.ekf_Qn);
     cfg.shadow_divergence_threshold = 0.75;   % [bar] node-level divergence alert threshold
     cfg.decision_alert_threshold    = 0.65;   % fused anomaly score alert threshold
     cfg.decision_critical_threshold = 0.85;   % critical anomaly score threshold

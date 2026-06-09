@@ -1,6 +1,6 @@
 function logs = updateLogs(logs, state, ekf, plc, comp1, comp2, prs1, prs2, ...
                             valve_states, params, k, sensor_p, sensor_q, ...
-                            src_p1, src_p2, demand, q_sto)
+                            src_p1, src_p2, demand, q_sto, cfg)
 % updateLogs  Append full system state to pre-allocated log arrays.
 
     %% Physical state
@@ -39,10 +39,15 @@ function logs = updateLogs(logs, state, ekf, plc, comp1, comp2, prs1, prs2, ...
     %% Roughness
     logs.logRough(:,k) = params.rough;
 
-    %% EKF
+    %% EKF — store z-scores so L2 norm is unit-variance across channels
     logs.logEst(:,k)  = ekf.xhat;
-    logs.logResP(:,k) = ekf.xhat(1:params.nNodes) - state.p;
-    logs.logResQ(:,k) = ekf.xhat(params.nNodes+1:end) - state.q;
+    if nargin >= 18 && ~isempty(cfg)
+        logs.logResP(:,k) = ekf.residualP / cfg.noise_sigma_p;
+        logs.logResQ(:,k) = ekf.residualQ / cfg.noise_sigma_q;
+    else
+        logs.logResP(:,k) = ekf.residualP;
+        logs.logResQ(:,k) = ekf.residualQ;
+    end
 
     %% PLC sensor bus
     logs.logPlcP(:,k) = plc.reg_p;

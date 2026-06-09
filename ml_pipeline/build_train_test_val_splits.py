@@ -121,13 +121,67 @@ def stratified_split(ids: np.ndarray, rng: np.random.Generator,
     return result
 
 
-def write_split_csv(df: pd.DataFrame, ids: list, path: Path,
-                    id_col: str = 'scenario_id'):
-    """Filter df to matching scenario IDs and write to path."""
-    subset = df[df[id_col].isin(set(ids))].reset_index(drop=True)
-    subset.to_csv(path, index=False)
-    print(f"  Wrote {len(subset):,} rows -> {path}")
-    return len(subset)
+def write_window_splits(csv_path: Path, split: dict, out_dir: Path,
+                        id_col: str = 'scenario_id',
+                        chunksize: int = 50_000) -> dict:
+    """Stream the windows dataset once and write each requested split."""
+    split_names = [
+        name for name in ['train', 'val', 'test', 'test_stress']
+        if split.get(name)
+    ]
+    id_to_split = {
+        int(sid): name
+        for name in split_names
+        for sid in split[name]
+    }
+    temp_paths = {
+        name: out_dir / f'.windows_{name}.csv.tmp'
+        for name in split_names
+    }
+    out_paths = {
+        name: out_dir / f'windows_{name}.csv'
+        for name in split_names
+    }
+    row_counts = {name: 0 for name in split_names}
+
+    for path in temp_paths.values():
+        path.unlink(missing_ok=True)
+
+    try:
+        for chunk_index, chunk in enumerate(
+                pd.read_csv(csv_path, chunksize=chunksize, low_memory=False)):
+            if id_col not in chunk.columns:
+                raise ValueError(f"no '{id_col}' column in windows dataset")
+
+            scenario_ids = pd.to_numeric(
+                chunk[id_col], errors='coerce'
+            ).fillna(0).astype(int)
+            destinations = scenario_ids.map(id_to_split)
+
+            for name in split_names:
+                subset = chunk.loc[destinations.eq(name)]
+                if subset.empty:
+                    continue
+                subset.to_csv(
+                    temp_paths[name],
+                    mode='a',
+                    header=not temp_paths[name].exists(),
+                    index=False,
+                )
+                row_counts[name] += len(subset)
+
+            if (chunk_index + 1) % 10 == 0:
+                print(f"    Processed {(chunk_index + 1) * chunksize:,} rows...")
+
+        for name in split_names:
+            temp_paths[name].replace(out_paths[name])
+            print(f"  Wrote {row_counts[name]:,} rows -> {out_paths[name]}")
+    except Exception:
+        for path in temp_paths.values():
+            path.unlink(missing_ok=True)
+        raise
+
+    return row_counts
 
 
 def rebuild_48h_test(sweep_dir: Path, out_dir: Path) -> Path:
@@ -302,6 +356,16 @@ def main():
         print(f"    {k:20s}: {len(v)} scenarios")
 
     # ── 4. Write manifest ────────────────────────────────────────────────
+    existing_test_48h = None
+    manifest_path = out / 'split_manifest.json'
+    if manifest_path.exists():
+        try:
+            with open(manifest_path) as f:
+                existing_manifest = json.load(f)
+            existing_test_48h = existing_manifest.get('splits', {}).get('test_48h')
+        except (json.JSONDecodeError, OSError):
+            pass
+
     manifest = {
         'seed': SEED,
         'splits': {k: sorted(v) for k, v in split.items()},
@@ -314,7 +378,9 @@ def main():
             'train': '70% of non-stress scenarios',
         }
     }
-    manifest_path = out / 'split_manifest.json'
+    if existing_test_48h is not None:
+        manifest['splits']['test_48h'] = existing_test_48h
+
     with open(manifest_path, 'w') as f:
         json.dump(manifest, f, indent=2)
     print(f"\n  Manifest -> {manifest_path}")
@@ -326,24 +392,12 @@ def main():
     # ── 5. Build CSV splits ──────────────────────────────────────────────
     print(f"\n[3] Building CSV splits...")
 
-    # Load windows dataset
-    print("  Loading attack_windows...")
-    df_w = pd.read_csv(args.windows, low_memory=False)
-    if 'scenario_id' not in df_w.columns:
-        print("  ERROR: no 'scenario_id' column in windows dataset")
+    print("  Streaming attack_windows...")
+    try:
+        write_window_splits(windows_path, split, out)
+    except ValueError as exc:
+        print(f"  ERROR: {exc}")
         return
-
-    # Coerce scenario_id to int
-    df_w['scenario_id'] = pd.to_numeric(df_w['scenario_id'], errors='coerce').fillna(0).astype(int)
-
-    print(f"  Windows shape: {df_w.shape}")
-
-    for split_name in ['train', 'val', 'test', 'test_stress']:
-        ids = split[split_name]
-        if not ids:
-            continue
-        out_path = out / f'windows_{split_name}.csv'
-        n = write_split_csv(df_w, ids, out_path)
 
     # Load baseline (normal-only) — add to train
     baseline_path = Path(args.baseline)

@@ -18,11 +18,14 @@ function ekf = initEKF(cfg, state)
     ekf.xhat  = x0;                          % initial state estimate
     ekf.P     = eye(nX) * cfg.ekf_P0;       % initial covariance
     ekf.P0    = cfg.ekf_P0;
-    ekf.Qn    = cfg.ekf_Qn;
     ekf.Rk    = cfg.ekf_Rk;
-    ekf.Qbase = eye(nX) * cfg.ekf_Qn;
-    ekf.Q     = ekf.Qbase;
-    ekf.R     = eye(nX) * cfg.ekf_Rk;
+    Q_vec = [repmat(cfg.ekf_Q_p_diag, nP, 1); repmat(cfg.ekf_Q_q_diag, nQ, 1)];
+    ekf.Q     = diag(Q_vec);
+    ekf.Qbase = ekf.Q;
+    ekf.Qn    = ekf.Q;
+    R_vec = [repmat(cfg.noise_sigma_p^2, nP, 1); ...   % 0.02^2 = 4e-4 bar²
+            repmat(cfg.noise_sigma_q^2, nQ, 1)];       % 5.0^2  = 25 SCMD²
+    ekf.R = diag(R_vec);
     ekf.C     = eye(nX);                    % observation matrix (identity)
 
     ekf.xhatP = state.p;
@@ -42,8 +45,8 @@ function ekf = initEKF(cfg, state)
 
     ekf.adaptive_enable = isfield(cfg, 'ekf_adaptive_enable') && cfg.ekf_adaptive_enable;
     ekf.adaptive_lambda = get_cfg_field(cfg, 'ekf_adaptive_lambda', 0.98);
-    ekf.adaptive_floor  = get_cfg_field(cfg, 'ekf_adaptive_q_floor', cfg.ekf_Qn);
-    ekf.adaptive_cap    = get_cfg_field(cfg, 'ekf_adaptive_q_cap', max(cfg.ekf_Qn * 25, cfg.ekf_Qn));
+    ekf.adaptive_floor  = get_cfg_field(cfg, 'ekf_adaptive_q_floor', Q_vec);
+    ekf.adaptive_cap    = get_cfg_field(cfg, 'ekf_adaptive_q_cap', max(Q_vec * 25, Q_vec));
     ekf.shadow_threshold = get_cfg_field(cfg, 'shadow_divergence_threshold', 0.75);
     ekf.S = eye(nX);
     ekf.chi2_stat = 0.0;

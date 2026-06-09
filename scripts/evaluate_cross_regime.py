@@ -353,6 +353,12 @@ def main():
     print(f"\n[models] Loading from {model_dir}")
     lstm_det, gnn_det = load_models(model_dir)
 
+    # Honour the seq_len the model was actually trained with
+    if lstm_det.seq_len != args.seq_len:
+        print(f"[seq_len] Overriding --seq-len {args.seq_len} → {lstm_det.seq_len} "
+              f"(from model checkpoint)")
+        args.seq_len = lstm_det.seq_len
+
     # ── Scaler + feature contract ─────────────────────────────────────────
     scaler, feat_cols, df_train_normal = build_scaler(
         SIM_ROOT / args.train_csv, args.nrows_train)

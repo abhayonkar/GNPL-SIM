@@ -1,0 +1,11 @@
+Attack,Class,Mean IP (bar),Max IP (bar),Rows > MAOP (%),LD (SCMD),FCH4 (t CO2e/day)
+A1,SourceSpike,1.4179,8.97,1.168,0.0,0.0
+A2,CompRamp,1.6229,21.71,2.571,0.0,0.0
+A3,ValveForce,1.3524,9.05,0.001,0.0,0.0
+A4,DemandInject,1.4294,8.52,0.034,0.0,0.0
+A5,PressureSpoof,1.3243,8.66,0.001,0.0,0.0
+A6,FlowSpoof,1.3552,8.45,0.021,0.0,0.0
+A7,PLCLatency,1.3124,8.57,0.004,0.0,0.0
+A8,PipeLeak,1.2959,8.72,0.001,0.0,3.8415
+A9,FDI_Stealthy,1.3981,8.65,0.033,0.0,0.0
+A10,ReplayAttack,1.3797,8.55,0.002,0.0,0.0

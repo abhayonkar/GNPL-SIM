@@ -172,7 +172,9 @@ function [params, state, comp1, comp2, prs1, prs2, ekf, plc, logs] = runSimulati
         ekf = updateEKF(ekf, plc.reg_p, plc.reg_q, state.p, state.q, params, cfg);
 
         %% 18. CUSUM detector ────────────────────────────────────── Phase 6
-        cusum = updateCUSUM(cusum, ekf.residual, cfg, k);
+        R_sigma = [repmat(cfg.noise_sigma_p, params.nNodes, 1); ...
+                   repmat(cfg.noise_sigma_q, params.nEdges, 1)];
+        cusum = updateCUSUM(cusum, ekf.residual ./ R_sigma, cfg, k);
 
         %% 19. Control logic
         if aid ~= 2
@@ -213,7 +215,7 @@ function [params, state, comp1, comp2, prs1, prs2, ekf, plc, logs] = runSimulati
             if log_k <= size(logs.logP,2)
                 logs = updateLogs(logs,state,ekf,plc,comp1,comp2,prs1,prs2, ...
                                   valve_states,params,log_k,sensor_p,sensor_q, ...
-                                  src_p1_k,src_p2_k,demand_k,q_sto);
+                                  src_p1_k,src_p2_k,demand_k,q_sto,cfg);
                 logs.logAttackId(log_k)   = aid;
                 logs.logAttackName(log_k) = schedule.label_name(k);
                 logs.logMitreId(log_k)    = schedule.label_mitre(k);

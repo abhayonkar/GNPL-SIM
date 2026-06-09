@@ -277,7 +277,9 @@ function run_48h_continuous(varargin)
         end
 
         ekf   = updateEKF(ekf, plc.reg_p, plc.reg_q, state.p, state.q, params, cfg);
-        cusum = updateCUSUM(cusum, ekf.residual, cfg, k);
+        R_sigma = [repmat(cfg.noise_sigma_p, params.nNodes, 1); ...
+                   repmat(cfg.noise_sigma_q, params.nEdges, 1)];
+        cusum = updateCUSUM(cusum, ekf.residual ./ R_sigma, cfg, k);
 
         if aid ~= 2
             [comp1, comp2, prs1, prs2, valve_states, plc] = ...

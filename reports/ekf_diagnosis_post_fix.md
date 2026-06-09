@@ -1,7 +1,7 @@
 # Phase 0 — Physics-EKF Residual Diagnosis
 
 **Dataset:** `automated_dataset\attack_windows\physics_dataset_windows.csv`  
-**Generated:** 2026-06-04T11:23:48
+**Generated:** 2026-06-09T00:33:50
 
 ---
 
@@ -13,12 +13,12 @@ Physics anomaly score = L2(EKF residuals) + 0.1 × CUSUM_upper + 0.05 × chi2_st
 
 | Metric | Value |
 |--------|-------|
-| Normal mean | 321.0077 |
-| Attack mean | 128.5831 |
-| Normal std  | 2183.1667 |
-| Attack std  | 192.0347 |
-| Pooled std  | 1549.6926 |
-| **Cohen's d** | **0.124** |
+| Normal mean | 124.5121 |
+| Attack mean | 111.0320 |
+| Normal std  | 366.3987 |
+| Attack std  | 141.8201 |
+| Pooled std  | 277.8138 |
+| **Cohen's d** | **0.049** |
 
 **Assessment:** POOR SEPARATION (d < 0.5) — Residual is effectively random between classes. Calibration bug confirmed.
 
@@ -26,9 +26,9 @@ Physics anomaly score = L2(EKF residuals) + 0.1 × CUSUM_upper + 0.05 × chi2_st
 
 | Metric | Value |
 |--------|-------|
-| Normal mean | 4.6532 |
-| Attack mean | 4.5621 |
-| **Cohen's d** | **0.148** |
+| Normal mean | 4.4937 |
+| Attack mean | 4.4746 |
+| **Cohen's d** | **0.038** |
 
 **Assessment:** POOR SEPARATION (d < 0.5) — Residual is effectively random between classes. Calibration bug confirmed.
 
@@ -38,16 +38,16 @@ Physics anomaly score = L2(EKF residuals) + 0.1 × CUSUM_upper + 0.05 × chi2_st
 
 | Node | Normal mean | Attack mean | Cohen's d | Assessment |
 |------|-------------|-------------|-----------|------------|
-| PRS1 | -7.6104 | -5.7575 | 0.668 | ~ |
-| J6 | 3.8437 | 1.9693 | 0.655 | ~ |
-| S2 | -2.0273 | -1.7411 | 0.330 | ✗ |
-| J1 | 0.5241 | -0.5711 | 0.212 | ✗ |
-| D3 | 0.8116 | 1.0248 | 0.199 | ✗ |
-| STO | 0.9424 | 0.5898 | 0.185 | ✗ |
-| CS2 | 4.9246 | 5.4688 | 0.173 | ✗ |
-| J4 | -1.5196 | -1.1827 | 0.169 | ✗ |
-| D1 | -0.0350 | -0.2908 | 0.163 | ✗ |
-| D6 | 0.0198 | 0.0883 | 0.157 | ✗ |
+| S2 | 0.0629 | -0.1911 | 0.026 | ✗ |
+| CS1 | -0.0808 | 0.1626 | 0.024 | ✗ |
+| PRS2 | -0.0631 | 0.0913 | 0.022 | ✗ |
+| J6 | -0.1415 | -0.0438 | 0.019 | ✗ |
+| S1 | 0.0686 | -0.0953 | 0.014 | ✗ |
+| PRS1 | 0.0745 | 0.1346 | 0.010 | ✗ |
+| J2 | -0.0691 | -0.0114 | 0.010 | ✗ |
+| D1 | -0.0853 | -0.0368 | 0.010 | ✗ |
+| J1 | -0.0909 | -0.0371 | 0.010 | ✗ |
+| D2 | -0.0628 | -0.0201 | 0.009 | ✗ |
 
 ---
 
@@ -55,21 +55,21 @@ Physics anomaly score = L2(EKF residuals) + 0.1 × CUSUM_upper + 0.05 × chi2_st
 
 | Metric | Value |
 |--------|-------|
-| ekf_l2_normal_p50 | 16.8950 |
-| ekf_l2_normal_p99 | 22.6386 |
-| ekf_l2_attack_p50 | 15.8619 |
-| ekf_l2_attack_p99 | 53.6570 |
-| ekf_range_ratio | 2.3702 |
+| ekf_l2_normal_p50 | 24.2960 |
+| ekf_l2_normal_p99 | 51.3314 |
+| ekf_l2_attack_p50 | 24.3979 |
+| ekf_l2_attack_p99 | 82.9182 |
+| ekf_range_ratio | 1.6153 |
 | cusum_normal_p50 | 0.0000 |
-| cusum_normal_p99 | 79705.0994 |
+| cusum_normal_p99 | 10290.7462 |
 | cusum_attack_p50 | 0.0000 |
 | cusum_attack_p99 | 0.0000 |
-| ekf_cusum_correlation | 0.0340 |
+| ekf_cusum_correlation | 0.0167 |
 
 **Range interpretation:**
 
-- EKF L2 p99 ratio (attack/normal) = 2.37 ≥ 2 — adequate dynamic range.
-- EKF–CUSUM correlation = 0.034 ≈ 0 — residuals are **not** tracking the EKF innovation. Root cause: Weymouth residual is computed on wrong state (physics vs PLC bus mismatch).
+- EKF L2 p99 ratio (attack/normal) = 1.62 < 2 — residual barely changes under attack. Likely normalisation or sign-convention bug in `computeWeymouthResiduals.m`.
+- EKF–CUSUM correlation = 0.017 ≈ 0 — residuals are **not** tracking the EKF innovation. Root cause: Weymouth residual is computed on wrong state (physics vs PLC bus mismatch).
 
 ---
 
@@ -77,10 +77,10 @@ Physics anomaly score = L2(EKF residuals) + 0.1 × CUSUM_upper + 0.05 × chi2_st
 
 | Check | Result |
 |-------|--------|
-| Raw score separation (Cohen's d ≥ 1.5) | FAIL (d=0.124) |
-| Log score separation (Cohen's d ≥ 1.5) | FAIL (d=0.148) |
-| EKF range ratio ≥ 2.0 | PASS (ratio=2.37) |
-| EKF–CUSUM correlation ≥ 0.3 | FAIL (r=0.034) |
+| Raw score separation (Cohen's d ≥ 1.5) | FAIL (d=0.049) |
+| Log score separation (Cohen's d ≥ 1.5) | FAIL (d=0.038) |
+| EKF range ratio ≥ 2.0 | FAIL (ratio=1.62) |
+| EKF–CUSUM correlation ≥ 0.3 | FAIL (r=0.017) |
 
 **Next step:**
 
