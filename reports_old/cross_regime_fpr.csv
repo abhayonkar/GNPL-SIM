@@ -1,0 +1,5 @@
+model,fpr
+LSTM-AE,0.7997
+GNN,0.5033
+Physics-EKF,0.0
+Hybrid-IDS,0.6822

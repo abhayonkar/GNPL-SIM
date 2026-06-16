@@ -184,7 +184,7 @@ function cfg = simConfig()
     % With flows now in SCMD (800 nominal), R=25 gives chi2_stat ≈ 1 under H0.
     cfg.ekf_R_diag     = 25.0;     % WAS: 0.05 → now matches noise_sigma_q^2 = 5^2
     cfg.ekf_Q_p_diag = 0.01;    % bar² — allow pressure state to adapt
-    cfg.ekf_Q_q_diag = 10.0;    % SCMD^2 - allow flow state to adapt
+    cfg.ekf_Q_q_diag  = 29.14^2 - 5^2; % SCMD^2 — Q = sigma_obs^2 - R (process noise, recalibrated from verifyNoiseStats)
     cfg.ekf_P0_diag    = 1000.0;    % initial covariance on SCMD-scale flow states
 
     % ================================================================
@@ -202,7 +202,7 @@ function cfg = simConfig()
     % ================================================================
     cfg.noise_ar1_phi   = 0.85;         % AR(1) coefficient
     cfg.noise_sigma_p   = 0.02;         % pressure noise std [barg]
-    cfg.noise_sigma_q   = 5.0;          % flow noise std [SCMD]
+    cfg.noise_sigma_q   = 29.14;          % flow noise std [SCMD]
 
     % ================================================================
     % SIMULATION TIMING

@@ -1,5 +1,0 @@
-model,family,n_runs,f1_mean,f1_std,auc_mean,auc_std,precision_mean,precision_std,recall_mean,recall_std,detection_delay_median_s_mean,detection_delay_median_s_std
-GNN,ALL,9,0.0,0.0,,,0.0,0.0,0.0,0.0,,
-Hybrid-IDS,ALL,9,0.0,0.0,,,0.0,0.0,0.0,0.0,,
-LSTM-AE,ALL,9,0.0,0.0,,,0.0,0.0,0.0,0.0,,
-Physics-EKF,ALL,9,0.0,0.0,,,0.0,0.0,0.0,0.0,,

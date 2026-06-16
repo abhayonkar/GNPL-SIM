@@ -1,0 +1,33 @@
+{
+  "models": [
+    {
+      "model": "LSTM-AE",
+      "f1": 0.0547,
+      "auc": 0.8949,
+      "precision": 0.0281,
+      "recall": 1.0
+    },
+    {
+      "model": "GNN",
+      "f1": 0.0614,
+      "auc": 0.6517,
+      "precision": 0.0321,
+      "recall": 0.7204
+    },
+    {
+      "model": "Physics-EKF",
+      "f1": 0.0,
+      "auc": 0.5551,
+      "precision": 0.0,
+      "recall": 0.0
+    },
+    {
+      "model": "Hybrid-IDS",
+      "f1": 0.0604,
+      "auc": 0.7692,
+      "precision": 0.0311,
+      "recall": 1.0
+    }
+  ],
+  "note": "1 step = 1 second at 1 Hz logging rate"
+}

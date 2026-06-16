@@ -9,7 +9,14 @@
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Abhay.DESKTOP-HP65TET\\\\Documents\\\\Sim\" -Recurse -Force)",
       "Bash(Select-Object -Property FullName, PSIsContainer)",
       "Bash(Sort-Object FullName)",
-      "Bash(Format-Table -AutoSize)"
+      "Bash(Format-Table -AutoSize)",
+      "Bash(PYTHONIOENCODING=utf-8 python fixes/tesseract_split_inflation.py)",
+      "Bash(python scripts/verify_fix_status.py)",
+      "Bash(python ml_pipeline/diagnostic_physics_residual.py --dataset automated_dataset/attack_windows/physics_dataset_windows.csv --out reports/ekf_diagnosis_chi2_primary.md)",
+      "Bash(python -c \"import pandas as pd; df = pd.read_csv\\('automated_dataset/attack_windows/physics_dataset_windows.csv', nrows=5000, low_memory=False\\); print\\('regime_class unique:', df['regime_class'].unique\\(\\)[:20] if 'regime_class' in df.columns else 'NOT FOUND'\\); print\\('columns with warmup or regime:', [c for c in df.columns if 'regime' in c.lower\\(\\) or 'warmup' in c.lower\\(\\)]\\)\")",
+      "Bash(python ml_pipeline/train_temporal_graph.py --help)",
+      "PowerShell(Get-ChildItem \"c:\\\\Users\\\\Abhay.DESKTOP-HP65TET\\\\Documents\\\\Sim\\\\automated_dataset\\\\continuous_48h\\\\run_01\" | Select-Object Name, @{N='MB';E={[math]::Round\\($_.Length/1MB,1\\)}})",
+      "PowerShell(python -c \"import pandas as pd; df=pd.read_csv\\(r'c:\\\\Users\\\\Abhay.DESKTOP-HP65TET\\\\Documents\\\\Sim\\\\ml_outputs\\\\splits\\\\test_48h_continuous.csv', nrows=5\\); print\\(f'{df.shape[1]} cols'\\); cols=list\\(df.columns\\); print\\(cols[:5]\\); ekf_q=[c for c in cols if 'ekf_resid_q' in c]; print\\(f'ekf_resid_q cols: {len\\(ekf_q\\)}'\\)\")"
     ]
   }
 }

@@ -1,0 +1,26 @@
+{
+  "total_rows": 1676649,
+  "n_scenarios": 279,
+  "n_features": 178,
+  "normal_rows": 1344498,
+  "anomaly_rows": 332151,
+  "attack_ids_present": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10
+  ],
+  "models_trained": [
+    "iforest",
+    "scores",
+    "rf",
+    "xgb"
+  ]
+}

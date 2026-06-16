@@ -1,0 +1,26 @@
+{
+  "note": "Threshold recalibrated on 48h-normal data (FPR=5%)",
+  "models": [
+    {
+      "model": "LSTM-AE-recal",
+      "f1": 0.2001,
+      "auc": 0.8949,
+      "precision": 0.1418,
+      "recall": 0.3398
+    },
+    {
+      "model": "GNN-recal",
+      "f1": 0.0579,
+      "auc": 0.6517,
+      "precision": 0.0301,
+      "recall": 0.7441
+    },
+    {
+      "model": "Physics-EKF-recal",
+      "f1": 0.0748,
+      "auc": 0.5551,
+      "precision": 0.0542,
+      "recall": 0.1204
+    }
+  ]
+}

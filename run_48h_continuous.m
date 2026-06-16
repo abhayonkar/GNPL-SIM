@@ -564,11 +564,15 @@ function schedule = attack_plan_to_schedule(plan, N, dt)
 
     attack_start_s_vec = zeros(N, 1);
     for i = 1:plan.n_attacks
+        aid_i = plan.ids(i);
         k_s = max(1, round(plan.start_s(i) / dt));
         k_e = min(N, round((plan.start_s(i) + plan.dur_s(i)) / dt));
         attack_start_s_vec(k_s:k_e) = plan.start_s(i);
+        schedule.label_id(k_s:k_e)    = int32(aid_i);
+        schedule.label_name(k_s:k_e)  = names(min(aid_i, numel(names)));
+        schedule.label_mitre(k_s:k_e) = mitres(min(aid_i, numel(mitres)));
     end
-    schedule.attack_start_s = attack_start_s_vec;   % new field on schedule struct
+    schedule.attack_start_s = attack_start_s_vec;
 end
 
 
@@ -627,6 +631,7 @@ function fid = open_streaming_csv(fpath, params)
     hdr = [hdr ',valve_E8,valve_E14,valve_E15,STO_inventory'];
     hdr = [hdr ',cusum_S_upper,cusum_S_lower,cusum_alarm,chi2_stat,chi2_alarm'];
     for i = 1:params.nNodes, hdr = [hdr sprintf(',ekf_resid_%s', char(nn(i)))]; end %#ok
+    for i = 1:params.nEdges, hdr = [hdr sprintf(',ekf_resid_q_%s', char(en(i)))]; end %#ok
     for i = 1:params.nNodes, hdr = [hdr sprintf(',plc_p_%s', char(nn(i)))]; end %#ok
     for i = 1:params.nEdges, hdr = [hdr sprintf(',plc_q_%s', char(en(i)))]; end %#ok
     hdr = [hdr ',FAULT_ID,ATTACK_ID,ATTACK_START_S,MITRE_CODE,label,regime_class'];
@@ -665,6 +670,7 @@ function write_streaming_row(fid, log_k, t_s, state, ekf, plc, ...
             cusum.S_upper, cusum.S_lower, int32(cusum.alarm), ...
             ekf.chi2_stat, int32(ekf.chi2_alarm));
     fprintf(fid, ',%.4f', ekf.residualP / cfg.noise_sigma_p);   % z-score innovations (Fix 2+5)
+    fprintf(fid, ',%.4f', ekf.residualQ / cfg.noise_sigma_q);   % flow EKF residuals (Fix 5)
     fprintf(fid, ',%.4f', plc.reg_p);
     fprintf(fid, ',%.4f', plc.reg_q);
     fprintf(fid, ',%d,%d,%.1f,%d,%d,%s\n', fault_label, aid, atk_start_s, mc, label, regime_class);

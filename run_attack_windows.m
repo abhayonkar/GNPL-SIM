@@ -327,6 +327,7 @@ function export_attack_scenario_csv(logs, cfg, params, schedule, scen, fpath)
     hdr=[hdr ',valve_E8,valve_E14,valve_E15,STO_inventory'];
     hdr=[hdr ',cusum_S_upper,cusum_S_lower,cusum_alarm,chi2_stat,chi2_alarm'];
     for i=1:params.nNodes, hdr=[hdr sprintf(',ekf_resid_%s',char(nn(i)))]; end %#ok
+    for i=1:params.nEdges, hdr=[hdr sprintf(',ekf_resid_q_%s',char(en(i)))]; end %#ok
     for i=1:params.nNodes, hdr=[hdr sprintf(',plc_p_%s',char(nn(i)))]; end %#ok
     for i=1:params.nEdges, hdr=[hdr sprintf(',plc_q_%s',char(en(i)))]; end %#ok
     hdr=[hdr ',FAULT_ID,ATTACK_ID,ATTACK_NAME,MITRE_ID,label,regime_class'];
@@ -368,6 +369,7 @@ function export_attack_scenario_csv(logs, cfg, params, schedule, scen, fpath)
         fprintf(fid, ',%.4f,%.4f,%d,%.4f,%d', ...
             logCU(k), logCL(k), int32(logCA(k)), logChi2(k), int32(logChi2A(k)));
         fprintf(fid, ',%.4f', logs.logResP(:,k));
+        fprintf(fid, ',%.4f', logs.logResQ(:,k));
         fprintf(fid, ',%.4f', logs.logPlcP(:,k));
         fprintf(fid, ',%.4f', logs.logPlcQ(:,k));
         % Map physics-step index k back to schedule step (logs are decimated by log_every)

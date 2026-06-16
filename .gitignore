@@ -101,7 +101,12 @@ Ignore specific Sim subdirectories
 /data/
 /files/
 
+# Large ML outputs
+ml_outputs_old/
+*.pkl
+"@
 
+/context/
 
 !ml_pipeline/
 !ml_outputs/

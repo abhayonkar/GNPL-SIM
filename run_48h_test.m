@@ -551,11 +551,15 @@ function schedule = attack_plan_to_schedule(plan, N, dt)
 
     attack_start_s_vec = zeros(N, 1);
     for i = 1:plan.n_attacks
+        aid_i = plan.ids(i);
         k_s = max(1, round(plan.start_s(i) / dt));
         k_e = min(N, round((plan.start_s(i) + plan.dur_s(i)) / dt));
         attack_start_s_vec(k_s:k_e) = plan.start_s(i);
+        schedule.label_id(k_s:k_e)    = int32(aid_i);
+        schedule.label_name(k_s:k_e)  = names(min(aid_i, numel(names)));
+        schedule.label_mitre(k_s:k_e) = mitres(min(aid_i, numel(mitres)));
     end
-    schedule.attack_start_s = attack_start_s_vec;   % new field on schedule struct
+    schedule.attack_start_s = attack_start_s_vec;
 end
 
 

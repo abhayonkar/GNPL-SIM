@@ -29,10 +29,11 @@ function results = verifyNoiseStats(csv_path, cfg)
 %     results = verifyNoiseStats('automated_dataset/master_dataset.csv', cfg);
 
     if nargin < 1 || isempty(csv_path)
-        csv_path = 'automated_dataset/master_dataset.csv';
+        csv_path = 'automated_dataset/attack_windows/physics_dataset_windows.csv';
     end
     if nargin < 2
-        addpath('config');
+        func_dir = fileparts(mfilename('fullpath'));
+        addpath(fullfile(func_dir, '..', 'config'));
         cfg = simConfig();
     end
 
@@ -57,8 +58,8 @@ function results = verifyNoiseStats(csv_path, cfg)
 
     %% Identify pressure and flow columns
     all_vars = T.Properties.VariableNames;
-    p_cols   = all_vars(contains(all_vars, 'pressure_bar'));
-    q_cols   = all_vars(contains(all_vars, 'flow_kgs') | contains(all_vars, 'flow_scmd'));
+    p_cols   = all_vars(startsWith(all_vars, 'p_') & endsWith(all_vars, '_bar'));
+    q_cols   = all_vars(startsWith(all_vars, 'q_') & endsWith(all_vars, '_kgs'));
 
     fprintf('Pressure columns: %d  |  Flow columns: %d\n', numel(p_cols), numel(q_cols));
 

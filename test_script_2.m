@@ -13,6 +13,6 @@ fprintf('phi_p=%.3f, phi_q=%.3f, sigma_p=%.4f, sigma_q=%.4f\n', ...
 
 % 3. Physics compliance:
 % Runs automatically during scenario generation; collect from scenario_health.csv
-health = readtable('ml_outputs/attack_windows/traditional_ml/run_4_clean/scenario_health.csv');
+health = readtable('ml_outputs/attack_windows/traditional_ml/run_5/scenario_health.csv');
 fprintf('Compliance: %d/%d scenarios (%.1f%%)\n', ...
         sum(~health.diverged), height(health), 100*mean(~health.diverged))

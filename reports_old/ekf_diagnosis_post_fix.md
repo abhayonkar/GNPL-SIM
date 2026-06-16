@@ -1,7 +1,7 @@
 # Phase 0 — Physics-EKF Residual Diagnosis
 
 **Dataset:** `automated_dataset\attack_windows\physics_dataset_windows.csv`  
-**Generated:** 2026-06-09T00:33:50
+**Generated:** 2026-06-12T21:42:53
 
 ---
 
