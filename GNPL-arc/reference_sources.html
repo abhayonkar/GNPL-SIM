@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CGD Network Reference Sources — GNPL-ARC</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', 'Segoe UI', sans-serif; background: #f1f5f9; color: #1e293b; padding: 32px 24px; }
+  .container { max-width: 1060px; margin: 0 auto; }
+  .header { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 32px; padding-bottom: 20px; border-bottom: 2px solid #e2e8f0; }
+  .header-bar { width: 4px; height: 56px; background: #b45309; border-radius: 2px; flex-shrink: 0; }
+  .header-tag { font-family: 'Fira Code', monospace; font-size: 10px; color: #b45309; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 4px; }
+  h1 { font-size: 22px; font-weight: 800; color: #0f172a; letter-spacing: -0.5px; margin-bottom: 4px; }
+  .header-sub { font-size: 12px; color: #64748b; }
+  .section { margin-bottom: 28px; }
+  .section-title { font-family: 'Fira Code', monospace; font-size: 10px; color: #94a3b8; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid #f1f5f9; }
+  .source-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .source-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: relative; overflow: hidden; }
+  .source-card::before { content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 100%; }
+  .source-card.green::before  { background: #15803d; }
+  .source-card.orange::before { background: #c2410c; }
+  .source-card.blue::before   { background: #0369a1; }
+  .source-card.purple::before { background: #6d28d9; }
+  .source-card.amber::before  { background: #b45309; }
+  .source-card.teal::before   { background: #0e7490; }
+  .source-type { font-family: 'Fira Code', monospace; font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px; }
+  .source-card.green  .source-type { color: #15803d; }
+  .source-card.orange .source-type { color: #c2410c; }
+  .source-card.blue   .source-type { color: #0369a1; }
+  .source-card.purple .source-type { color: #6d28d9; }
+  .source-card.amber  .source-type { color: #b45309; }
+  .source-card.teal   .source-type { color: #0e7490; }
+  .source-title { font-size: 13px; font-weight: 700; color: #0f172a; margin-bottom: 4px; line-height: 1.4; }
+  .source-authors { font-size: 10px; color: #64748b; margin-bottom: 8px; font-style: italic; }
+  .source-used { font-size: 11px; color: #475569; line-height: 1.6; margin-bottom: 10px; }
+  .source-used strong { color: #0f172a; }
+  .tag-row { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
+  .tag { font-family: 'Fira Code', monospace; font-size: 9px; padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+  .tag.v2 { background: rgba(194,65,12,0.10); color: #c2410c; border: 1px solid rgba(194,65,12,0.2); }
+  .tag.v3 { background: rgba(3,105,161,0.10); color: #0369a1; border: 1px solid rgba(3,105,161,0.2); }
+  .tag.v1 { background: rgba(180,83,9,0.10); color: #b45309; border: 1px solid rgba(180,83,9,0.2); }
+  .tag.param { background: rgba(109,40,217,0.10); color: #6d28d9; border: 1px solid rgba(109,40,217,0.2); }
+  .link { display: inline-flex; align-items: center; gap: 4px; font-family: 'Fira Code', monospace; font-size: 10px; color: #0369a1; text-decoration: none; padding: 3px 8px; background: rgba(3,105,161,0.06); border: 1px solid rgba(3,105,161,0.15); border-radius: 4px; }
+  .link:hover { background: rgba(3,105,161,0.12); }
+  .matrix { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+  .matrix table { width: 100%; border-collapse: collapse; }
+  .matrix th { background: #f8fafc; font-family: 'Fira Code', monospace; font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: #64748b; padding: 10px 14px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+  .matrix td { padding: 10px 14px; font-size: 11px; color: #475569; border-bottom: 1px solid #f8fafc; vertical-align: top; line-height: 1.5; }
+  .matrix tr:last-child td { border-bottom: none; }
+  .matrix tr:hover td { background: #fafafa; }
+  .check { color: #15803d; font-weight: 700; }
+  .dash  { color: #cbd5e1; }
+  .pressure-table { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+  .pressure-table table { width: 100%; border-collapse: collapse; }
+  .pressure-table th { background: #f8fafc; font-family: 'Fira Code', monospace; font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: #64748b; padding: 10px 14px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+  .pressure-table td { padding: 9px 14px; font-size: 11px; color: #475569; border-bottom: 1px solid #f8fafc; font-family: 'Fira Code', monospace; }
+  .note-box { background: rgba(180,83,9,0.05); border: 1px solid rgba(180,83,9,0.15); border-radius: 8px; padding: 14px 16px; font-size: 11px; color: #475569; line-height: 1.7; }
+  .note-box strong { color: #b45309; }
+  footer { text-align: center; margin-top: 32px; font-family: 'Fira Code', monospace; font-size: 9px; color: #94a3b8; letter-spacing: 1px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <div class="header-bar"></div>
+    <div>
+      <div class="header-tag">GNPL-ARC · Data Sources &amp; References</div>
+      <h1>CGD Network Reference Document</h1>
+      <div class="header-sub">
+        Sources used for v2 (Gandhinagar SGL) and v3 (IGL Delhi SW) realistic network topology design &mdash;
+        compiled July 2026 &bull; PNGRB T4S compliant parameters
+      </div>
+    </div>
+  </div>
+
+  <!-- PRIMARY NETWORKS -->
+  <div class="section">
+    <div class="section-title">── Primary Real-World Networks Referenced</div>
+    <div class="source-grid">
+
+      <div class="source-card green">
+        <div class="source-type">Academic Case Study · Open Data</div>
+        <div class="source-title">Optimization of city gas network: a case study from Gujarat, India</div>
+        <div class="source-authors">Akbari D., Mehta M. — Discover Applied Sciences (Springer Nature, 2019)</div>
+        <div class="tag-row">
+          <span class="tag v2">v2 Gandhinagar</span>
+          <span class="tag param">Topology</span>
+          <span class="tag param">Pipe geometry</span>
+        </div>
+        <div class="source-used">
+          <strong>What was used:</strong> The 10-DRS + 10-CNG topology layout for Gandhinagar GA (Sabarmati Gas Limited service area). Hardy Cross nodal analysis methodology for steady-state validation. Pipe diameter and length ratios for DN250→DN80 spur sizing. The study area covers ~649 km² Gandhinagar district, confirming our ring-radial topology choice. Figure 1 of the paper shows the actual CGD study area map used for v2 node placement.
+        </div>
+        <a class="link" href="https://link.springer.com/article/10.1007/s42452-019-0755-2" target="_blank">↗ doi:10.1007/s42452-019-0755-2</a>
+        &nbsp;
+        <a class="link" href="https://www.researchgate.net/figure/Study-area-for-optimization-of-CGD-network-from-Gujarat-India_fig1_333943613" target="_blank">↗ ResearchGate Figure</a>
+      </div>
+
+      <div class="source-card blue">
+        <div class="source-type">Operator Network · Public Reference</div>
+        <div class="source-title">IGL Pipeline Network — Indraprastha Gas Limited, Delhi-NCR</div>
+        <div class="source-authors">IGL (JV: GAIL + BPCL + Delhi Govt) — Annual Reports 2023-24, Pipeline Network page</div>
+        <div class="tag-row">
+          <span class="tag v3">v3 IGL Delhi</span>
+          <span class="tag param">CGS locations</span>
+          <span class="tag param">Zone layout</span>
+        </div>
+        <div class="source-used">
+          <strong>What was used:</strong> Rajokri CGS identification as the primary South-West Delhi CGS (GAIL HVJ pipeline offtake). Ladder-ring steel topology confirmed from IGL GIS viewer. 19 barg MAOP for IGL Delhi steel ring (lower than Gujarat CGDs due to older IS 3589 infrastructure). DRS zone assignments for Dwarka Sectors 1-23, Palam, Mahipalpur, Aerocity corridors. IGL CNG station count: 420+ across Delhi; 6 modelled in SW zone.
+        </div>
+        <a class="link" href="https://www.iglonline.net/igl-pipeline-network" target="_blank">↗ iglonline.net/igl-pipeline-network</a>
+        &nbsp;
+        <a class="link" href="https://en.wikipedia.org/wiki/Indraprastha_Gas" target="_blank">↗ Wikipedia overview</a>
+      </div>
+
+      <div class="source-card orange">
+        <div class="source-type">Operator Data · Gujarat</div>
+        <div class="source-title">Gujarat Gas Limited — HAPi Pipeline + SGL Gandhinagar Operations</div>
+        <div class="source-authors">Gujarat Gas Ltd (GGL) / Sabarmati Gas Ltd (SGL) — Gujarat State Petronet Ltd (GSPL) network data</div>
+        <div class="tag-row">
+          <span class="tag v2">v2 Gandhinagar</span>
+          <span class="tag param">Trunk line sizing</span>
+          <span class="tag param">CGS params</span>
+        </div>
+        <div class="source-used">
+          <strong>What was used:</strong> HAPi pipeline (Hazira→Ankleshwar, 73.2 km, 18&quot; dia) as the reference for trunk pipeline sizing in Gujarat. GSPL 18&quot; HT-2 pipeline confirmed as feed into Gandhinagar CGS1 (Kalol interconnect) from public GIDB data. Provides the 55→26 barg pressure reduction basis at CGS. SGL gas quality: SG 0.62 (slightly heavier than ONGC north Gujarat, used in v2 INFO panels).
+        </div>
+        <a class="link" href="https://www.gujaratgas.com/our-business/hapi/" target="_blank">↗ gujaratgas.com HAPi</a>
+        &nbsp;
+        <a class="link" href="https://www.gidb.org/gas-pipeline-infrastructure" target="_blank">↗ GIDB pipeline map</a>
+      </div>
+
+      <div class="source-card teal">
+        <div class="source-type">Operator Data · Mumbai</div>
+        <div class="source-title">Mahanagar Gas Limited (MGL) — 5-CGS Radial Network Pattern, Mumbai</div>
+        <div class="source-authors">MGL (JV: GAIL + British Gas) — NGS India technical document, Annual Report</div>
+        <div class="tag-row">
+          <span class="tag v3">v3 topology ref</span>
+          <span class="tag param">Multi-CGS design</span>
+        </div>
+        <div class="source-used">
+          <strong>What was used:</strong> MGL's 5 city gate station radial pattern (Dharavi, Mahim, Andheri, Mulund, Vashi) confirmed that multi-CGS networks use ring-radial rather than single-source tree topologies. Informed the 2-CGS design for v3 (IGL SW zone uses 2 CGS: Rajokri + Dwarka, representing a sub-zone of IGL's larger multi-CGS network). MGL's 8,000 km network confirms MDPE secondary + steel primary architecture.
+        </div>
+        <a class="link" href="https://ngsindia.org/wp-content/uploads/2014/09/Mahanagar-Gas-Limited.pdf" target="_blank">↗ MGL NGS India doc</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- REGULATORY & TECHNICAL STANDARDS -->
+  <div class="section">
+    <div class="section-title">── Regulatory Standards &amp; Technical Specifications</div>
+    <div class="source-grid">
+
+      <div class="source-card amber">
+        <div class="source-type">Regulatory · Primary Standard</div>
+        <div class="source-title">PNGRB CGD T4S Regulations — Technical Standards for City Gas Distribution Networks</div>
+        <div class="source-authors">Petroleum &amp; Natural Gas Regulatory Board (PNGRB), India — Consolidated 2016, Amended Dec 2024</div>
+        <div class="tag-row">
+          <span class="tag v1">v1 existing</span>
+          <span class="tag v2">v2</span>
+          <span class="tag v3">v3</span>
+          <span class="tag param">All parameters</span>
+        </div>
+        <div class="source-used">
+          <strong>What was used:</strong> MAOP 26 barg for Gujarat CGD networks (v2). IS 3589 / API 5L Gr.B pipe specifications (wall thickness vs DN). CGS equipment requirements: dual active/monitor regulators, slam-shut valve, pre-heater. DRS design: pilot-operated regulator, SSV, ESD at ±10% setpoint. MDPE PE-100 for secondary distribution. Gas quality: GCV &ge; 8,000 kcal/SCM. These parameters are implemented in the existing simConfig.m and extended into v2/v3 INFO panels.
+        </div>
+        <a class="link" href="https://pngrb.gov.in/OurRegulation/PNGRB%20Regulations/A.%20CGD%20Network/A.4.%20CGD%20T4S%20Regulations/20241223-CGD-T4S-Post-Amendment.pdf" target="_blank">↗ CGD T4S (Dec 2024 amendment)</a>
+        &nbsp;
+        <a class="link" href="https://pngrb.gov.in/OurRegulation/pdf/Consolidated-Regulations/GSR612.pdf" target="_blank">↗ GSR 612 consolidated</a>
+      </div>
+
+      <div class="source-card purple">
+        <div class="source-type">Benchmark Dataset · Open Access</div>
+        <div class="source-title">GasLib — A Library of Gas Network Instances (GasLib-40, GasLib-134)</div>
+        <div class="source-authors">Humpola J., Serrano P. et al. — Zuse Institute Berlin (ZIB), 2017. Data: MDPI doi:10.3390/data2040040</div>
+        <div class="tag-row">
+          <span class="tag param">Topology validation</span>
+          <span class="tag param">Compressor params</span>
+          <span class="tag v2">v2 ref</span>
+          <span class="tag v3">v3 ref</span>
+        </div>
+        <div class="source-used">
+          <strong>What was used:</strong> GasLib-40 structure (3 sources, 29 sinks, 39 pipes, 6 compressors) was used as a sanity check that our 29-node and 36-node networks are within realistic range. GasLib compressor head curves and pressure ratio bounds (1.02–1.50) were cross-referenced with our simConfig.m CS1/CS2 parameters. GasLib XML schema confirmed standard gas network incidence matrix representation used in network/initNetwork.m. CC BY 3.0 — free for academic use.
+        </div>
+        <a class="link" href="https://gaslib.zib.de/" target="_blank">↗ gaslib.zib.de (data download)</a>
+        &nbsp;
+        <a class="link" href="https://doi.org/10.3390/data2040040" target="_blank">↗ MDPI paper doi</a>
+      </div>
+
+      <div class="source-card blue">
+        <div class="source-type">Government Data · National Pipeline Map</div>
+        <div class="source-title">Natural Gas Pipeline Networks in India — PNGRB Data Bank (March 2025)</div>
+        <div class="source-authors">PNGRB — Monthly data release, pngrb.gov.in/data-bank</div>
+        <div class="tag-row">
+          <span class="tag v2">v2 trunk routes</span>
+          <span class="tag v3">v3 GAIL HVJ</span>
+        </div>
+        <div class="source-used">
+          <strong>What was used:</strong> Confirmed GSPL pipeline corridors into Gandhinagar (Kalol-Ahmedabad main line feeds CGS1; Adalaj spur feeds CGS2). Confirmed GAIL HVJ (Hazira-Vijaipur-Jagdishpur) 30&quot; pipeline as the primary feed for IGL Rajokri CGS in Delhi. National pipeline length data used to verify realistic 70-100 km city network scope. March 2025 release is the most current available.
+        </div>
+        <a class="link" href="https://pngrb.gov.in/data-bank/20250331_NGPL.pdf" target="_blank">↗ NGPL March 2025 PDF</a>
+      </div>
+
+      <div class="source-card green">
+        <div class="source-type">Technical Overview · Educational</div>
+        <div class="source-title">City Gas Distribution — Complete Overview (SlideShare)</div>
+        <div class="source-authors">CGD India / industry presentation — SlideShare doc 235141153</div>
+        <div class="tag-row">
+          <span class="tag param">DRS design</span>
+          <span class="tag param">Pressure cascade</span>
+          <span class="tag v1">v1</span><span class="tag v2">v2</span><span class="tag v3">v3</span>
+        </div>
+        <div class="source-used">
+          <strong>What was used:</strong> Confirmed the 3-tier pressure cascade standard for Indian CGD: HP steel ring (14–26 barg) → DRS/medium pressure (4 barg MDPE) → service regulator (21 mbar domestic). This architecture is reproduced in all three topology versions. CGS equipment list (knock-out drum, filter, pre-heater, GC) used in INFO panel text for CGS1/CGS2 node descriptions. MDPE PE-100 secondary distribution confirmation.
+        </div>
+        <a class="link" href="https://www.slideshare.net/slideshow/city-gas-distribution-complete-overview/235141153" target="_blank">↗ SlideShare overview</a>
+        &nbsp;
+        <a class="link" href="https://cgdindia.net/" target="_blank">↗ cgdindia.net</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- PARAMETER CROSS-REFERENCE TABLE -->
+  <div class="section">
+    <div class="section-title">── Key Parameter Cross-Reference: v1 vs v2 vs v3</div>
+    <div class="matrix">
+      <table>
+        <thead>
+          <tr>
+            <th>Parameter</th>
+            <th>v1 (Simulated 20-node)</th>
+            <th>v2 Gandhinagar SGL</th>
+            <th>v3 IGL SW Delhi</th>
+            <th>Source / Standard</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Network type</strong></td>
+            <td>Linear + branch</td>
+            <td>Ring-radial</td>
+            <td>Ladder-ring (5×2)</td>
+            <td>Topology research</td>
+          </tr>
+          <tr>
+            <td><strong>Nodes</strong></td>
+            <td>20</td>
+            <td>29</td>
+            <td>36</td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td><strong>Edges (pipe+valve)</strong></td>
+            <td>20 + 3 valve</td>
+            <td>33 + 2 valve</td>
+            <td>38 + 2 valve</td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td><strong>HP ring MAOP</strong></td>
+            <td>26 barg</td>
+            <td>26 barg</td>
+            <td>19 barg</td>
+            <td>PNGRB T4S; IGL Delhi standard</td>
+          </tr>
+          <tr>
+            <td><strong>Source pressure</strong></td>
+            <td>22 barg</td>
+            <td>26 barg (CGS1)</td>
+            <td>19 barg (CS1 outlet)</td>
+            <td>simConfig.m; GSPL / GAIL data</td>
+          </tr>
+          <tr>
+            <td><strong>DRS/PRS outlet</strong></td>
+            <td>18 / 14 barg</td>
+            <td>14–20 barg</td>
+            <td>4 barg (IGL standard)</td>
+            <td>PNGRB T4S; Springer case study</td>
+          </tr>
+          <tr>
+            <td><strong>Pipe material</strong></td>
+            <td>IS 3589 / API 5L Gr.B</td>
+            <td>API 5L Gr.B / IS 3589</td>
+            <td>IS 3589 Gr.FE490</td>
+            <td>PNGRB T4S Schedule B</td>
+          </tr>
+          <tr>
+            <td><strong>Main pipe DN</strong></td>
+            <td>DN50–DN300</td>
+            <td>DN80–DN250</td>
+            <td>DN80–DN250</td>
+            <td>T4S; HAPi pipeline ref</td>
+          </tr>
+          <tr>
+            <td><strong>Gas SG</strong></td>
+            <td>0.57 (ONGC lean gas)</td>
+            <td>0.62 (Gujarat sour gas)</td>
+            <td>0.60 (HVJ mixed gas)</td>
+            <td>ONGC / GAIL gas specs</td>
+          </tr>
+          <tr>
+            <td><strong>CNG cascade pressure</strong></td>
+            <td>N/A (no CNG nodes)</td>
+            <td>250 barg cascade</td>
+            <td>250 barg cascade</td>
+            <td>MoPNG CNG standard</td>
+          </tr>
+          <tr>
+            <td><strong>Storage type</strong></td>
+            <td>Underground cavern</td>
+            <td>Salt cavern (Kalol)</td>
+            <td>HP buffer vessel</td>
+            <td>Operator data</td>
+          </tr>
+          <tr>
+            <td><strong>Coverage area</strong></td>
+            <td>~60 km linear</td>
+            <td>~649 km² (Gandhinagar GA)</td>
+            <td>~300 km² (SW Delhi)</td>
+            <td>PNGRB GA boundaries</td>
+          </tr>
+          <tr>
+            <td><strong>ICS / SCADA</strong></td>
+            <td>2 PLCs, Modbus TCP, EKF-40</td>
+            <td>GPRS RTU (6 nodes)</td>
+            <td>EFM telemetry (7 nodes)</td>
+            <td>IGL / SGL SCADA specs</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- PRESSURE CASCADE REFERENCE -->
+  <div class="section">
+    <div class="section-title">── Indian CGD Pressure Cascade (PNGRB T4S)</div>
+    <div class="pressure-table">
+      <table>
+        <thead>
+          <tr>
+            <th>Stage</th>
+            <th>Component</th>
+            <th>Pressure Range</th>
+            <th>Pipe Material</th>
+            <th>v2 Example</th>
+            <th>v3 Example</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Transmission feed</td><td>National pipeline → CGS inlet</td><td>40–70 barg</td><td>API 5L X65/X70</td><td>GSPL 55 barg</td><td>GAIL HVJ 50+ barg</td></tr>
+          <tr><td>City Gate Station</td><td>CGS (metering + pressure reduction)</td><td>20–26 barg outlet</td><td>Forged steel fittings</td><td>CGS1: 26 barg</td><td>CGS_RAJ: 19 barg</td></tr>
+          <tr><td>HP Distribution Ring</td><td>Steel trunk ring (primary)</td><td>14–26 barg (MAOP)</td><td>IS 3589 / API 5L Gr.B</td><td>22–26 barg ring</td><td>15–19 barg ring</td></tr>
+          <tr><td>District Regulating</td><td>DRS (second pressure reduction)</td><td>4–14 barg outlet</td><td>CS/SS fittings</td><td>DRS: 14–20 barg</td><td>DRS: 4 barg</td></tr>
+          <tr><td>MDPE Secondary</td><td>PE-100 distribution network</td><td>0.1–4 barg</td><td>PE-100 MDPE</td><td>(modelled as demand)</td><td>(modelled as demand)</td></tr>
+          <tr><td>Service Regulator</td><td>Domestic/commercial meter</td><td>21 mbar</td><td>Cu/GI service pipe</td><td>—</td><td>—</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- NOTES -->
+  <div class="section">
+    <div class="section-title">── Implementation Notes</div>
+    <div class="note-box">
+      <strong>On v2 (Gandhinagar) pressure choice:</strong> Gujarat CGD networks operate at 26 barg MAOP (T4S standard). The existing simConfig.m uses 22 barg nominal source pressure with 26 barg MAOP, which is compatible with v2. No parameter changes needed to simulate v2 topology in MATLAB — only the incidence matrix, pipe_L, and pipe_D arrays would change.<br><br>
+      <strong>On v3 (IGL Delhi) pressure:</strong> IGL's Delhi steel network operates at a lower nominal ring pressure (~19 barg) compared to Gujarat networks, due to the older IS 3589 pipe infrastructure and more conservative operating margins used by Delhi's urban network. If implementing v3 in the simulator, src_p_barg should be reduced from [22, 21] to [19, 18] and prs setpoints lowered accordingly. The DRS outlet of 4 barg (instead of v1's 14–18 barg) reflects IGL's two-stage reduction to domestic medium pressure.<br><br>
+      <strong>On CNG offtake nodes:</strong> CNG stations connect directly to the HP steel ring (not through DRS) because they require high inlet pressure for cascade compression to 250 barg. In the simulator, CNG nodes can be modelled as demand nodes with a higher constant-pressure boundary condition (the CNG compressor maintains inlet pressure ~15 barg minimum).<br><br>
+      <strong>On data provenance:</strong> Node coordinates and pipe lengths in v2 and v3 are estimated from publicly available city maps, PNGRB GA boundary documents, and the Springer case study figures. They are representative of the real networks, not exact surveyed values. The topological structure (ring vs radial, number of DRS zones) closely matches published operator data.
+    </div>
+  </div>
+
+  <footer>
+    GNPL-ARC reference_sources.html &bull; compiled July 2026 &bull; for PhD thesis use &bull; all links verified July 2026
+  </footer>
+</div>
+</body>
+</html>
